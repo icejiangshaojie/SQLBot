@@ -271,6 +271,55 @@ class LLMService:
         if _system_templates.get('custom_prompt'):
             self.sql_message.append(HumanPromptMessage(content=_system_templates['custom_prompt']))
             self.sql_message.append(AIPromptMessage(content='我已确认您提供的额外信息，我会进行参考。'))
+
+        # AI2BI: inject context — 指定 Skill 测试 > Agent 路由 > 通用兜底
+        try:
+            _skill_path = getattr(self.chat_question, 'skill_path', None)
+            if _skill_path:
+                from apps.ai2bi.skill_router import get_explicit_skill_context
+                _route = get_explicit_skill_context(_skill_path)
+                self.sql_message.append(HumanPromptMessage(content=_route.get("context_prompt", "")))
+                self.sql_message.append(AIPromptMessage(
+                    content=f'我已确认指定 Skill 测试模式：{_skill_path}。'
+                            f'在此模式下，我不仅可以生成 SQL，还可以回答关于 Skill 内容的知识性问题。'
+                            f'对于知识性问题，我会使用 knowledge_answer 字段返回回答，而不是返回 success:false。'))
+            else:
+                from apps.ai2bi.skill_router import route_question
+                _route = route_question(self.chat_question.question)
+                _ctx = _route.get("context_prompt", "")
+                if _ctx:
+                    self.sql_message.append(HumanPromptMessage(content=_ctx))
+                    if _route.get("is_fallback"):
+                        self.sql_message.append(AIPromptMessage(content='我已确认通用兜底模式。未命中业务 Agent，我会基于通用规则和数据源回答。'))
+                    else:
+                        _agent = _route.get("agent", {})
+                        self.sql_message.append(AIPromptMessage(content=f'我已确认命中「{_agent.get("name", "")}」Agent，加载了其绑定的 Skills、表白名单和隔离规则。我会严格遵守。'))
+        except Exception as e:
+            pass
+
+        # AI2BI: inject user memory as soft context
+        try:
+            from apps.ai2bi.models import Ai2biMemory
+            from sqlmodel import Session as _MemSession, select as _mem_select
+            from common.core.db import engine as _mem_engine
+            with _MemSession(_mem_engine) as _mem_s:
+                _memories = _mem_s.exec(
+                    _mem_select(Ai2biMemory)
+                    .where(Ai2biMemory.user_id == self.current_user.id, Ai2biMemory.status == "active")
+                    .order_by(Ai2biMemory.pinned.desc(), Ai2biMemory.created_at.desc())
+                    .limit(20)
+                ).all()
+            if _memories:
+                _mem_lines = []
+                for _m in _memories:
+                    _tag = "📌" if _m.pinned else "•"
+                    _mem_lines.append(f"{_tag} [{_m.category or '通用'}] {_m.content}")
+                _mem_prompt = f"<user_memory>\n以下是关于该用户的记忆和偏好，作为软上下文参考（不能覆盖硬规则）：\n" + "\n".join(_mem_lines) + "\n</user_memory>"
+                self.sql_message.append(HumanPromptMessage(content=_mem_prompt))
+                self.sql_message.append(AIPromptMessage(content='我已确认用户记忆，会作为偏好参考，不会用记忆覆盖业务硬规则。'))
+        except Exception as e:
+            pass
+
         if _system_templates.get('terminologies'):
             self.sql_message.append(HumanPromptMessage(content=_system_templates['terminologies']))
             self.sql_message.append(AIPromptMessage(content='我已确认您提供的术语信息，我会进行参考。'))
@@ -1175,6 +1224,87 @@ class LLMService:
                 err = traceback.format_exc(limit=1, chain=True)
                 raise SQLBotDBError(err)
 
+    def generate_analysis(self, session: Session, sql: str, result: dict, route_info: dict):
+        """
+        AI2BI: 独立分析阶段 — 基于 SQL 执行结果（Evidence Pack）生成业务分析。
+
+        这是 SQL 生成和图表渲染之后的独立 LLM 调用：
+        - 输入：Evidence Pack（SQL 结果 + 指标口径 + 路由信息）
+        - 输出：带证据标注的分析文本（[SQL] / [计算] / [模型推导]）
+        - 约束：分析 LLM 只能引用 Evidence Pack 中的数据，禁止编造
+        """
+        import yaml as _yaml
+        from apps.ai2bi.evidence_builder import build_evidence_pack, evidence_pack_to_prompt
+
+        # 构建 Evidence Pack
+        pack = build_evidence_pack(sql, result, route_info)
+        evidence_prompt = evidence_pack_to_prompt(pack)
+
+        # 加载分析模板
+        template_path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "analysis_template.yaml")
+        try:
+            with open(template_path, "r", encoding="utf-8") as f:
+                _tpl = _yaml.safe_load(f)
+        except Exception:
+            _tpl = {"analysis_system": "你是数据分析助手。基于查询结果做分析。", "analysis_user": "问题: {question}"}
+
+        system_prompt = _tpl.get("analysis_system", "").replace("{evidence_pack}", evidence_prompt)
+        user_prompt = _tpl.get("analysis_user", "").replace("{question}", self.chat_question.question)
+
+        # 构建分析消息
+        from langchain_core.messages import SystemMessage, HumanMessage as LC_HumanMessage
+        analysis_msg = [
+            SystemMessage(content=system_prompt),
+            LC_HumanMessage(content=user_prompt),
+        ]
+
+        token_usage = {}
+        full_analysis_text = ''
+        res = process_stream(self.llm.stream(analysis_msg), token_usage)
+        for chunk in res:
+            if chunk.get('content'):
+                full_analysis_text += chunk.get('content')
+                yield chunk
+            if chunk.get('reasoning_content'):
+                yield chunk
+
+        # 质检
+        qa_result = None
+        try:
+            from apps.ai2bi.qa_checker import run_full_qa
+            qa_result = run_full_qa(sql, result, full_analysis_text, pack)
+            SQLBotLogUtil.info(f"AI2BI QA: passed={qa_result['passed']}, violations={qa_result.get('answer_violations', [])}")
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI QA failed: {e}")
+
+        # 保存分析记录
+        try:
+            self.record = save_sql_answer(session=session, record_id=self.record.id,
+                                          answer=orjson.dumps({'content': full_analysis_text, 'type': 'analysis'}).decode())
+        except Exception:
+            pass
+
+        # 保存证据记录（含质检结果）
+        try:
+            from apps.ai2bi.evidence_builder import save_evidence_record
+            save_evidence_record(
+                session=session,
+                record_id=self.record.id,
+                chat_id=self.record.chat_id,
+                route_info=route_info,
+                sql=sql,
+                result=result,
+                qa_passed=qa_result["passed"] if qa_result else None,
+                qa_violations=qa_result.get("answer_violations", []) if qa_result else None,
+            )
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI Evidence save failed: {e}")
+
+        # 返回质检摘要（供 run_task 发送到前端）
+        if qa_result:
+            import orjson as _orjson
+            yield {'qa_summary': _orjson.dumps(qa_result).decode()}
+
     def pop_chunk(self):
         try:
             chunk = self.chunk_list.pop(0)
@@ -1209,6 +1339,7 @@ class LLMService:
 
     def run_task(self, in_chat: bool = True, stream: bool = True,
                  finish_step: ChatFinishStep = ChatFinishStep.GENERATE_CHART, return_img: bool = True):
+        print("[DEBUG] run_task started", flush=True)
         json_result: Dict[str, Any] = {'success': True}
         _session = None
         try:
@@ -1304,6 +1435,31 @@ class LLMService:
             sql_operate = OperationEnum.GENERATE_SQL
             sql, tables = self.check_sql(session=_session, res=full_sql_text, operate=sql_operate)
 
+            # AI2BI: knowledge_qa 模式 — LLM 返回 sql="-- knowledge_qa" 时，直接输出知识回答，跳过 SQL 执行
+            _skill_path = getattr(self.chat_question, 'skill_path', None)
+            if sql.strip().startswith('-- knowledge_qa') or sql.strip().startswith('--knowledge_qa'):
+                # 提取 knowledge_answer 字段
+                _json_str = extract_nested_json(full_sql_text)
+                _knowledge_answer = None
+                if _json_str:
+                    try:
+                        _data = orjson.loads(_json_str)
+                        _knowledge_answer = _data.get('knowledge_answer', '')
+                    except Exception:
+                        pass
+                if not _knowledge_answer:
+                    _knowledge_answer = '（Skill 内容已加载，但未能提取到知识回答）'
+                # 保存到 record
+                self.chat_question.sql = sql
+                save_sql(session=_session, sql=sql, record_id=self.record.id)
+                if in_chat:
+                    yield 'data:' + orjson.dumps({'content': _knowledge_answer, 'type': 'knowledge_qa'}).decode() + '\n\n'
+                    yield 'data:' + orjson.dumps({'type': 'finish'}).decode() + '\n\n'
+                else:
+                    json_result['knowledge_answer'] = _knowledge_answer
+                    yield json_result
+                return
+
             # 表名安全检查：用 sqlglot 解析真实 SQL，不信任 AI 返回的 tables
             actual_tables = extract_tables_from_sql(sql, ds_type=self.ds.type)
             if not actual_tables:
@@ -1318,6 +1474,34 @@ class LLMService:
                     f"SQL contains unauthorized tables: {', '.join(unauthorized_tables)}. "
                     f"Allowed tables: {', '.join(allowed_tables)}"
                 )
+
+            # AI2BI: Agent-level business rule guardrail
+            try:
+                from apps.ai2bi.skill_router import route_question
+                _route = route_question(self.chat_question.question)
+                if not _route.get("is_fallback") and _route.get("agent"):
+                    _agent = _route["agent"]
+                    _exclusive = _route.get("exclusive_tables", [])
+                    _shared = _route.get("shared_tables", [])
+                    _sql_upper = sql.upper()
+
+                    # Check if SQL uses Agent's exclusive tables
+                    _all_allowed = set(_exclusive) | set(_shared)
+                    if _all_allowed:
+                        _violations = []
+                        # Check is_successful_auth for card domain
+                        if _agent.get("vertical") == "retail_card" and "IS_SUCCESSFUL_AUTH" not in _sql_upper:
+                            _violations.append("缺少硬过滤条件: is_successful_auth = 1")
+                        # Check partition condition
+                        if "PT" not in _sql_upper:
+                            _violations.append("缺少分区条件: pt = MAX(pt) 或 pt BETWEEN")
+                        if _violations:
+                            _warn = "⚠️ SQL Guardrail 警告:\n" + "\n".join(_violations)
+                            SQLBotLogUtil.info(f"AI2BI Guardrail: {_violations}")
+                            if in_chat:
+                                yield 'data:' + orjson.dumps({'content': _warn, 'type': 'info', 'msg': 'guardrail_warning'}).decode() + '\n\n'
+            except Exception:
+                pass
 
             if ((not self.current_assistant or is_page_embedded) and is_normal_user(
                     self.current_user)) or use_dynamic_ds:
@@ -1461,6 +1645,33 @@ class LLMService:
                         markdown_table = df_safe.to_markdown(index=False)
                         yield markdown_table + '\n\n'
 
+            # AI2BI: 独立分析阶段 — 基于 SQL 结果生成带证据标注的业务分析
+            try:
+                from apps.ai2bi.skill_router import route_question
+                _analysis_route = route_question(self.chat_question.question)
+                _analysis_res = self.generate_analysis(_session, real_execute_sql, result, _analysis_route)
+                if in_chat:
+                    yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_start'}).decode() + '\n\n'
+                    for chunk in _analysis_res:
+                        if chunk.get('content'):
+                            yield 'data:' + orjson.dumps(
+                                {'content': chunk.get('content'), 'type': 'analysis'}).decode() + '\n\n'
+                        if chunk.get('qa_summary'):
+                            yield 'data:' + orjson.dumps(
+                                {'content': chunk.get('qa_summary'), 'type': 'evidence_qa'}).decode() + '\n\n'
+                    yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_done'}).decode() + '\n\n'
+                else:
+                    if stream:
+                        for chunk in _analysis_res:
+                            if chunk.get('content'):
+                                yield chunk.get('content')
+                        yield '\n\n'
+            except Exception as _analysis_err:
+                SQLBotLogUtil.info(f"AI2BI Analysis skipped: {_analysis_err}")
+                if in_chat:
+                    yield 'data:' + orjson.dumps(
+                        {'type': 'info', 'msg': 'analysis_skipped', 'content': str(_analysis_err)}).decode() + '\n\n'
+
             if in_chat:
                 yield 'data:' + orjson.dumps({'type': 'finish'}).decode() + '\n\n'
             else:
@@ -1500,6 +1711,21 @@ class LLMService:
             error_msg: str
             if isinstance(e, SingleMessageError):
                 error_msg = str(e)
+                # AI2BI: skill_path 模式下，LLM 可能仍返回 success:false 拒绝知识问题
+                # 将其转为 knowledge_qa 输出而非 error
+                _skill_path = getattr(self.chat_question, 'skill_path', None)
+                if _skill_path and in_chat:
+                    # 尝试提取 message 内容作为知识回答
+                    _fallback_answer = error_msg
+                    try:
+                        _parsed = orjson.loads(error_msg)
+                        if isinstance(_parsed, dict) and 'message' in _parsed:
+                            _fallback_answer = _parsed['message']
+                    except Exception:
+                        pass
+                    yield 'data:' + orjson.dumps({'content': _fallback_answer, 'type': 'knowledge_qa'}).decode() + '\n\n'
+                    yield 'data:' + orjson.dumps({'type': 'finish'}).decode() + '\n\n'
+                    return
             elif isinstance(e, SQLBotDBConnectionError):
                 error_msg = orjson.dumps(
                     {'message': str(e), 'type': 'db-connection-err'}).decode()
@@ -1811,8 +2037,9 @@ def get_token_usage(chunk: BaseMessageChunk, token_usage: dict = None):
             token_usage['input_tokens'] = chunk.usage_metadata.get('input_tokens')
             token_usage['output_tokens'] = chunk.usage_metadata.get('output_tokens')
             token_usage['total_tokens'] = chunk.usage_metadata.get('total_tokens')
-    except Exception:
-        pass
+            print(f"[AI2BI-DEBUG] get_token_usage captured: {token_usage}", flush=True)
+    except Exception as e:
+        print(f"[AI2BI-DEBUG] get_token_usage error: {e}", flush=True)
 
 
 def process_stream(res: Iterator[BaseMessageChunk],

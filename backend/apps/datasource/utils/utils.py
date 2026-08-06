@@ -12,8 +12,15 @@ def aes_encrypt(data):
     return base64.b64encode(encrypt)
 
 def aes_decrypt(encrypted_data):
-    encrypted_data = base64.b64decode(encrypted_data)
-    cipher = AES.new(key, AES.MODE_ECB)
-    text = cipher.decrypt(encrypted_data)
-    decrypted_text = unpad(text, AES.block_size)
-    return decrypted_text.decode('utf-8')
+    # Try decrypt first, fall back to plaintext if not encrypted
+    try:
+        raw = base64.b64decode(encrypted_data)
+        cipher = AES.new(key, AES.MODE_ECB)
+        text = cipher.decrypt(raw)
+        decrypted_text = unpad(text, AES.block_size)
+        return decrypted_text.decode('utf-8')
+    except Exception:
+        # Not encrypted (plaintext JSON) - return as-is
+        if isinstance(encrypted_data, bytes):
+            return encrypted_data.decode('utf-8')
+        return encrypted_data

@@ -191,3 +191,8 @@ test.py
 !/.venv/
 
 sqlbot-xpack
+.gstack/
+
+# Build artifacts
+frontend_dist/
+seed_test_data.py

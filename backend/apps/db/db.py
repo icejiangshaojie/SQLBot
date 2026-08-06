@@ -8,17 +8,41 @@ from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 from typing import Optional, List
 
-import oracledb
-import psycopg2
-import pymssql
+try:
+    import oracledb
+except ImportError:
+    oracledb = None
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+try:
+    import pymssql
+except ImportError:
+    pymssql = None
 
 from apps.db.db_sql import get_table_sql, get_field_sql, get_version_sql
 from common.error import ParseSQLResultError
 
 if platform.system() != "Darwin":
-    import dmPython
-import pymysql
-import redshift_connector
+    try:
+        import dmPython
+    except ImportError:
+        dmPython = None
+try:
+    import pymysql
+except ImportError:
+    pymysql = None
+try:
+    import redshift_connector
+except ImportError:
+    redshift_connector = None
+try:
+    import pyhive
+    from pyhive import hive
+except ImportError:
+    pyhive = None
+    hive = None
 from sqlalchemy import create_engine, text, Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -36,7 +60,10 @@ from common.core.config import settings
 import sqlglot
 from sqlglot import expressions as exp
 from sqlalchemy.pool import NullPool
-from pyhive import hive
+try:
+    from pyhive import hive
+except ImportError:
+    hive = None
 
 try:
     if os.path.exists(settings.ORACLE_CLIENT_PATH):
@@ -272,17 +299,23 @@ def check_connection(trans: Optional[Trans], ds: CoreDatasource | AssistantOutDs
             else:
                 SQLBotLogUtil.info("failed")
                 return False
-    # else:
-    #     conn = get_ds_engine(ds)
-    #     try:
-    #         with conn.connect() as connection:
-    #             SQLBotLogUtil.info("success")
-    #             return True
-    #     except Exception as e:
-    #         SQLBotLogUtil.error(f"Datasource {ds.id} connection failed: {e}")
-    #         if is_raise:
-    #             raise HTTPException(status_code=500, detail=trans('i18n_ds_invalid') + f': {e.args}')
-    #         return False
+
+    # ODPS: uses SSH + odpscmd, not a DB driver
+    if equals_ignore_case(ds.type, 'odps'):
+        from apps.db.odps_adapter import check_connection as odps_check
+        try:
+            conf = json.loads(aes_decrypt(ds.configuration))
+            project = conf.get('database', 'zabank_dw')
+            env = conf.get('dbSchema', 'prd')
+            ok = odps_check(project=project, env=env)
+            if ok:
+                SQLBotLogUtil.info("ODPS connection success")
+            return ok
+        except Exception as e:
+            SQLBotLogUtil.error(f"ODPS connection failed: {e}")
+            if is_raise:
+                raise HTTPException(status_code=500, detail=trans('i18n_ds_invalid') + f': {e}')
+            return False
 
     return False
 
@@ -390,6 +423,21 @@ def get_schema(ds: CoreDatasource):
 
 
 def get_tables(ds: CoreDatasource):
+    # ODPS: uses SSH + odpscmd, skip SQL-based discovery
+    if equals_ignore_case(ds.type, 'odps'):
+        from apps.db.odps_adapter import list_tables as odps_list_tables
+        conf_dict = json.loads(aes_decrypt(ds.configuration))
+        project = conf_dict.get('database', 'zabank_dw')
+        env = conf_dict.get('dbSchema', 'prd')
+        result = odps_list_tables(project=project, env=env)
+        if result.status == 'error':
+            raise Exception(result.error_message)
+        res_list = []
+        for row in result.rows:
+            table_name = list(row.values())[0] if row else ''
+            res_list.append(TableSchema(table_name, ''))
+        return res_list
+
     conf = DatasourceConf(**json.loads(aes_decrypt(ds.configuration))) if not equals_ignore_case(ds.type,
                                                                                                  "excel") else get_engine_config()
     db = DB.get_db(ds.type)
@@ -450,6 +498,37 @@ def get_tables(ds: CoreDatasource):
 
 
 def get_fields(ds: CoreDatasource, table_name: str = None):
+    # ODPS: uses SSH + odpscmd DESC, skip SQL-based discovery
+    if equals_ignore_case(ds.type, 'odps'):
+        from apps.db.odps_adapter import desc_table as odps_desc_table
+        conf_dict = json.loads(aes_decrypt(ds.configuration))
+        project = conf_dict.get('database', 'zabank_dw')
+        env = conf_dict.get('dbSchema', 'prd')
+        result = odps_desc_table(table_name, project=project, env=env)
+        if result.status == 'error':
+            raise Exception(result.error_message)
+        res_list = []
+        in_fields = False
+        for line in result.raw_output.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('|') and stripped.endswith('|'):
+                cells = [c.strip() for c in stripped.split('|') if c.strip()]
+                if not in_fields:
+                    if cells and any('field' in c.lower() for c in cells):
+                        in_fields = True
+                    continue
+                if in_fields:
+                    if cells and cells[0].lower() in ('# partition', 'partition columns:'):
+                        in_fields = False
+                        continue
+                    if len(cells) >= 2:
+                        res_list.append(ColumnSchema(
+                            cells[0],
+                            cells[1],
+                            cells[2] if len(cells) > 2 else '',
+                        ))
+        return res_list
+
     conf = DatasourceConf(**json.loads(aes_decrypt(ds.configuration))) if not equals_ignore_case(ds.type,
                                                                                                  "excel") else get_engine_config()
     db = DB.get_db(ds.type)
@@ -716,6 +795,28 @@ def exec_sql(ds: CoreDatasource | AssistantOutDsSchema, sql: str, origin_column=
                 except Exception as ex:
                     raise ParseSQLResultError(str(ex))
 
+    # ODPS: uses SSH + odpscmd
+    if equals_ignore_case(ds.type, 'odps'):
+        from apps.db.odps_adapter import execute_odps
+        # MaxCompute does not support backtick quoting — strip them
+        odps_sql = sql.replace('`', '')
+        conf_dict = json.loads(aes_decrypt(ds.configuration))
+        project = conf_dict.get('database', 'zabank_dw')
+        env = conf_dict.get('dbSchema', 'prd')
+        timeout = conf_dict.get('timeout', 300)
+        result = execute_odps(odps_sql, project=project, env=env, timeout=timeout)
+        if result.status == 'error':
+            raise Exception(result.error_message)
+        columns = [c['name'] for c in result.columns]
+        if not origin_column:
+            columns = [c.lower() for c in columns]
+        result_list = [
+            {str(columns[i]): convert_value(value) for i, value in enumerate(row.values())}
+            for row in result.rows
+        ] if columns else []
+        return {"fields": columns, "data": result_list,
+                "sql": bytes.decode(base64.b64encode(bytes(sql, 'utf-8')))}
+
 
 def get_sqlglot_dialect(ds_type: str) -> str:
     """根据数据源类型获取 sqlglot dialect"""
@@ -725,6 +826,8 @@ def get_sqlglot_dialect(ds_type: str) -> str:
         return 'tsql'
     elif equals_ignore_case(ds_type, 'hive'):
         return 'hive'
+    elif equals_ignore_case(ds_type, 'odps'):
+        return 'mysql'  # ODPS SQL is close enough to MySQL for sqlglot read-only checks
     return None
 
 

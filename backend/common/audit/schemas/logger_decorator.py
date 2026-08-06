@@ -524,7 +524,10 @@ def system_log(config: Union[LogConfig, Dict]):
                         kwargs
                     )
                     from common.utils.crypto import sqlbot_decrypt
-                    input_account = await sqlbot_decrypt(input_account_dec)
+                    try:
+                        input_account = await sqlbot_decrypt(input_account_dec)
+                    except Exception:
+                        input_account = input_account_dec
                     with Session(engine) as session:
                         userInfo = get_user_by_account(session=session, account=input_account)
                         if userInfo is not None:

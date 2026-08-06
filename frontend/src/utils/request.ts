@@ -291,7 +291,7 @@ class HttpService {
     return this.instance.request({
       cancelToken: this.cancelTokenSource.token,
       ...config,
-    })
+    }) as unknown as Promise<T>
   }
 
   // GET request

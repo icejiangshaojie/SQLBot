@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from apps.ai_model.openai.llm import BaseChatOpenAI
+from apps.ai_model.anthropic_llm import ChatAnthropicCompat
 from apps.system.models.system_model import AiModelDetail
 from common.core.db import engine
 from common.utils.crypto import sqlbot_decrypt
@@ -109,12 +110,23 @@ class OpenAILLM(BaseLLM):
         return self.llm.invoke(prompt)
 
 
+class AnthropicLLM(BaseLLM):
+    def _init_llm(self) -> BaseChatModel:
+        return ChatAnthropicCompat(
+            model=self.config.model_name,
+            api_key=self.config.api_key or 'Empty',
+            base_url=self.config.api_base_url,
+            **self.config.additional_params,
+        )
+
+
 class LLMFactory:
     """Large Language Model Factory Class"""
 
     _llm_types: Dict[str, Type[BaseLLM]] = {
         "openai": OpenAILLM,
         "tongyi": OpenAILLM,
+        "anthropic": AnthropicLLM,
         "vllm": OpenAIvLLM,
         "azure": OpenAIAzureLLM,
     }
@@ -170,10 +182,16 @@ async def get_default_config(custom_model_id: Optional[int] = None) -> LLMConfig
             if db_model.api_key:
                 db_model.api_key = await sqlbot_decrypt(db_model.api_key)
 
-        # 构造 LLMConfig
+        # 构造 LLMConfig — protocol: 1=openai, 2=vllm, 3=anthropic
+        if db_model.protocol == 3:
+            model_type = "anthropic"
+        elif db_model.protocol == 1:
+            model_type = "openai"
+        else:
+            model_type = "vllm"
         return LLMConfig(
             model_id=db_model.id,
-            model_type="openai" if db_model.protocol == 1 else "vllm",
+            model_type=model_type,
             model_name=db_model.base_model,
             api_key=db_model.api_key,
             api_base_url=db_model.api_domain,

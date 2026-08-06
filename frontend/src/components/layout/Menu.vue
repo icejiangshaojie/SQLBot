@@ -4,20 +4,14 @@ import { ElMenu } from 'element-plus-secondary'
 import { useRoute, useRouter } from 'vue-router'
 import MenuItem from './MenuItem.vue'
 import { useUserStore } from '@/stores/user'
-// import { routes } from '@/router'
-const userStore = useUserStore()
+
 const router = useRouter()
 defineProps({
   collapse: Boolean,
 })
 
 const route = useRoute()
-// const menuList = computed(() => route.matched[0]?.children || [])
 const activeMenu = computed(() => route.path)
-/* const activeIndex = computed(() => {
-  const arr = route.path.split('/')
-  return arr[arr.length - 1]
-}) */
 const showSysmenu = computed(() => {
   return route.path.includes('/system')
 })
@@ -37,39 +31,58 @@ const formatRoute = (arr: any, parentPath = '') => {
   })
 }
 
+// AI2BI: 只展示问数 + 6 个 AI2BI 模块，隐藏 Dashboard/Assistant/原 SQLBot 配置
+const ai2biMenuPaths = new Set([
+  '/chat/index',
+  '/assets/index',
+  '/tables/index',
+  '/metrics/index',
+  '/skill-dev/index',
+  '/memory/index',
+])
+
 const routerList = computed(() => {
   if (showSysmenu.value) {
     const [sysRouter] = formatRoute(
       router.getRoutes().filter((route: any) => route?.name === 'system')
     )
-    return sysRouter.children
+    return sysRouter?.children || []
   }
+  // Flatten AI2BI routes: use child routes directly as top-level menu items
   const list = router.getRoutes().filter((route) => {
-    return (
-      !route.path.includes('embeddedPage') &&
-      !route.path.includes('assistant') &&
-      !route.path.includes('embeddedPage') &&
-      !route.path.includes('canvas') &&
-      !route.path.includes('member') &&
-      !route.path.includes('professional') &&
-      !route.path.includes('401') &&
-      !route.path.includes('training') &&
-      !route.path.includes('prompt') &&
-      !route.path.includes('permission') &&
-      !route.path.includes('embeddedCommon') &&
-      !route.path.includes('preview') &&
-      !route.path.includes('audit') &&
-      route.path !== '/login' &&
-      route.path !== '/admin-login' &&
-      route.path !== '/chatPreview' &&
-      !route.path.includes('/system') &&
-      ((route.path.includes('set') && userStore.isSpaceAdmin) || !route.redirect) &&
-      route.path !== '/:pathMatch(.*)*' &&
-      !route.path.includes('dsTable')
-    )
+    return ai2biMenuPaths.has(route.path)
   })
-
-  return list
+  // Ensure meta is set on each route for menu rendering
+  return list.map((route: any) => {
+    // If meta exists and has title, use it; otherwise derive from route name
+    if (!route.meta) route.meta = {}
+    if (!route.meta.title && route.name) {
+      const titleMap: Record<string, string> = {
+        'chat': '问数',
+        'assets': '数据资产',
+        'tables': '表管理',
+        'metrics': '指标管理',
+        'skill-dev': 'Skill 开发',
+        'memory': '我的记忆',
+      }
+      route.meta.title = titleMap[route.name as string] || route.name
+    }
+    // Ensure icon props exist
+    const iconMap2: Record<string, { iconActive: string; iconDeActive: string }> = {
+      'chat': { iconActive: 'chat', iconDeActive: 'noChat' },
+      'assets': { iconActive: 'ds', iconDeActive: 'noDs' },
+      'tables': { iconActive: 'model', iconDeActive: 'noModel' },
+      'metrics': { iconActive: 'workspace', iconDeActive: 'noWorkspace' },
+      'skill-dev': { iconActive: 'set', iconDeActive: 'noSet' },
+      'memory': { iconActive: 'log', iconDeActive: 'noLog' },
+    }
+    const icons = iconMap2[route.name as string]
+    if (icons && !route.meta.iconActive) {
+      route.meta.iconActive = icons.iconActive
+      route.meta.iconDeActive = icons.iconDeActive
+    }
+    return route
+  })
 })
 </script>
 

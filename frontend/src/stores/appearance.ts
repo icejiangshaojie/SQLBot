@@ -3,6 +3,11 @@ import { store } from '@/stores/index'
 // import { defaultFont, list } from '@/api/font'
 import { request } from '@/utils/request'
 
+// Stub LicenseGenerator for community edition (no xpack)
+declare global {
+  interface Window { LicenseGenerator?: any }
+}
+
 import { setTitle, setCurrentColor } from '@/utils/utils'
 
 const basePath = import.meta.env.VITE_API_BASE_URL
@@ -60,7 +65,7 @@ export const useAppearanceStore = defineStore('appearanceStore', {
       login: '',
       slogan: '',
       web: '',
-      name: 'SQLBot',
+      name: 'AI2BI',
       foot: 'false',
       footContent: '',
       loaded: false,
@@ -253,14 +258,23 @@ export const useAppearanceStore = defineStore('appearanceStore', {
       // if (!isDataEaseBi) {
       //   document.title = ''
       // }
-      const obj = LicenseGenerator.getLicense()
+      const obj = window.LicenseGenerator?.getLicense?.() || { status: 'valid' }
       if (obj?.status !== 'valid') {
         setCurrentColor('#1CBA90')
         document.title = 'SQLBot'
         setLinkIcon()
         return
       }
-      const resData = await request.get('/system/appearance/ui')
+      let resData
+      try {
+        resData = await request.get('/system/appearance/ui')
+      } catch (e) {
+        // Appearance API not available (community edition), use defaults
+        setCurrentColor('#1CBA90')
+        setLinkIcon()
+        this.loaded = true
+        return
+      }
       this.loaded = true
       if (!resData?.length) {
         setCurrentColor('#1CBA90')
@@ -301,8 +315,8 @@ export const useAppearanceStore = defineStore('appearanceStore', {
         document.title = this.name
         setTitle(this.name)
       } else {
-        document.title = 'SQLBot'
-        setTitle('SQLBot')
+        document.title = 'AI2BI'
+        setTitle('AI2BI')
       }
       setLinkIcon(this.web)
     },

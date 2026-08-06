@@ -28,8 +28,14 @@ async def local_login(
     trans: Trans,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
 ) -> Token:
-    origin_account = await sqlbot_decrypt(form_data.username)
-    origin_pwd = await sqlbot_decrypt(form_data.password)
+    try:
+        origin_account = await sqlbot_decrypt(form_data.username)
+    except Exception:
+        origin_account = form_data.username
+    try:
+        origin_pwd = await sqlbot_decrypt(form_data.password)
+    except Exception:
+        origin_pwd = form_data.password
     user: BaseUserDTO = authenticate(session=session, account=origin_account, password=origin_pwd)
     if not user:
         raise HTTPException(status_code=400, detail=trans('i18n_login.account_pwd_error'))

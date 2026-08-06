@@ -202,26 +202,48 @@ onBeforeMount(() => {
           </div>
         </template>
       </template>
-      <Workspace v-if="!showSysmenu" :collapse="collapse"></Workspace>
-      <Menu :collapse="collapseCopy"></Menu>
-      <div class="bottom">
-        <div
-          v-if="showSysmenu"
-          class="back-to_workspace"
-          :class="collapse && 'collapse'"
-          @click="toWorkspace"
-        >
-          <el-icon size="18">
-            <icon_moments_categories_outlined></icon_moments_categories_outlined>
-          </el-icon>
-          {{ collapse ? '' : $t('workspace.return_to_workspace') }}
+      <div class="left-content">
+        <!-- Top: AI2BI logo + workspace -->
+        <div class="left-top">
+          <template v-if="appearanceStore.isBlue">
+            <div v-if="loginBg && !collapse" class="default-sqlbot">
+              <img height="30" width="30" :src="loginBg" alt="" class="collapse-icon" @click="toChatIndex" />
+              <span style="max-width: 150px" :title="appearanceStore.name" class="ellipsis">{{ appearanceStore.name }}</span>
+            </div>
+            <custom_small v-else-if="collapse" style="margin: 0 0 6px 5px; cursor: pointer" @click="toChatIndex"></custom_small>
+            <div v-else class="default-sqlbot">
+              <custom_small class="collapse-icon"></custom_small>
+              <span style="max-width: 150px" :title="appearanceStore.name" class="ellipsis">{{ appearanceStore.name }}</span>
+            </div>
+          </template>
+          <template v-else>
+            <LOGO_fold v-if="collapse" style="margin: 0 0 6px 5px; cursor: pointer" @click="toChatIndex"></LOGO_fold>
+            <div v-else class="default-sqlbot">
+              <LOGO_fold class="collapse-icon" @click="toChatIndex"></LOGO_fold>
+              <span style="max-width: 150px" :title="appearanceStore.name" class="ellipsis">{{ appearanceStore.name }}</span>
+            </div>
+          </template>
+          <Workspace v-if="!showSysmenu" :collapse="collapse"></Workspace>
         </div>
-        <div class="personal-info">
-          <Person :collapse="collapse" :in-sysmenu="showSysmenu"></Person>
-          <el-icon size="20" class="fold" @click="handleFoldExpand">
-            <icon_side_expand_outlined v-if="collapse"></icon_side_expand_outlined>
-            <icon_side_fold_outlined v-else></icon_side_fold_outlined>
-          </el-icon>
+
+        <!-- Middle: navigation menu -->
+        <div class="left-middle">
+          <Menu :collapse="collapseCopy"></Menu>
+        </div>
+
+        <!-- Bottom: settings + user -->
+        <div class="left-bottom">
+          <div v-if="showSysmenu" class="back-to_workspace" :class="collapse && 'collapse'" @click="toWorkspace">
+            <el-icon size="18"><icon_moments_categories_outlined></icon_moments_categories_outlined></el-icon>
+            {{ collapse ? '' : $t('workspace.return_to_workspace') }}
+          </div>
+          <div class="personal-info">
+            <Person :collapse="collapse" :in-sysmenu="showSysmenu"></Person>
+            <el-icon size="20" class="fold" @click="handleFoldExpand">
+              <icon_side_expand_outlined v-if="collapse"></icon_side_expand_outlined>
+              <icon_side_fold_outlined v-else></icon_side_fold_outlined>
+            </el-icon>
+          </div>
         </div>
       </div>
     </div>
@@ -255,6 +277,32 @@ onBeforeMount(() => {
     padding: 16px;
     position: relative;
     min-width: 240px;
+    display: flex;
+    flex-direction: column;
+
+    .left-content {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .left-top {
+      flex-shrink: 0;
+    }
+
+    .left-middle {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      margin-top: 8px;
+    }
+
+    .left-bottom {
+      flex-shrink: 0;
+      padding-top: 8px;
+      border-top: 1px solid #e8e8e8;
+    }
 
     .default-sqlbot {
       display: flex;

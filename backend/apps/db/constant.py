@@ -29,6 +29,7 @@ class DB(Enum):
     pg = ('pg', 'PostgreSQL', '"', '"', ConnectType.sqlalchemy, 'PostgreSQL', [])
     starrocks = ('starrocks', 'StarRocks', '`', '`', ConnectType.py_driver, 'StarRocks', [])
     hive = ('hive', 'Apache Hive', '`', '`', ConnectType.py_driver, 'Hive', [])
+    odps = ('odps', 'MaxCompute/ODPS', '', '', ConnectType.py_driver, 'ODPS', [])
 
     def __init__(self, type, db_name, prefix, suffix, connect_type: ConnectType, template_name: str,
                  illegalParams: List[str]):

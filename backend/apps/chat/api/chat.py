@@ -271,7 +271,8 @@ def find_base_question(record_id: int, session: SessionDep):
 @require_permissions(permission=SqlbotPermission(type='chat', keyExpression="request_question.chat_id"))
 async def question_answer(session: SessionDep, current_user: CurrentUser, request_question: ChatQuestionBase,
                           current_assistant: CurrentAssistant):
-    question = ChatQuestion(chat_id=request_question.chat_id, question=request_question.question)
+    question = ChatQuestion(chat_id=request_question.chat_id, question=request_question.question,
+                            skill_path=request_question.skill_path)
     return await question_answer_inner(session, current_user, question, current_assistant, embedding=True)
 
 

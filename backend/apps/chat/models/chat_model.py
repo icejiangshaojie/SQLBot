@@ -342,6 +342,7 @@ class AiModelQuestion(BaseModel):
 class ChatQuestion(AiModelQuestion):
     chat_id: int
     datasource_id: Optional[int] = None
+    skill_path: Optional[str] = None
 
 
 class ChatMcp(ChatQuestion):
@@ -361,6 +362,7 @@ class ChatStart(BaseModel):
 class ChatQuestionBase(BaseModel):
     question: str = Body(description='用户提问')
     chat_id: int = Body(description='会话ID')
+    skill_path: Optional[str] = Body(description='AI2BI 开发态：指定 Skill 路径用于测试，绕过 Agent 路由', default=None)
 
 
 class McpQuestion(ChatQuestionBase):

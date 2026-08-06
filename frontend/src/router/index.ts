@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-// @ts-expect-error eslint-disable-next-line @typescript-eslint/ban-ts-comment
-import Layout from '@/components/layout/index.vue'
+// import Layout from '@/components/layout/index.vue'
 import LayoutDsl from '@/components/layout/LayoutDsl.vue'
+import Ai2biLayout from '@/components/layout/Ai2biLayout.vue'
 import SinglePage from '@/components/layout/SinglePage.vue'
 import login from '@/views/login/index.vue'
 import chat from '@/views/chat/index.vue'
@@ -33,6 +33,15 @@ import Workspace from '@/views/system/workspace/index.vue'
 import Page401 from '@/views/error/index.vue'
 import ChatPreview from '@/views/chat/preview.vue'
 
+// AI2BI module pages
+import Ai2biAssets from '@/views/ai2bi/assets/index.vue'
+import Ai2biTables from '@/views/ai2bi/tables/index.vue'
+import Ai2biMetrics from '@/views/ai2bi/metrics/index.vue'
+import Ai2biSkillDev from '@/views/ai2bi/skill-dev/index.vue'
+import Ai2biMemory from '@/views/ai2bi/memory/index.vue'
+import Ai2biDataDev from '@/views/ai2bi/data-dev/index.vue'
+import Ai2biAgents from '@/views/ai2bi/agents/index.vue'
+
 import { i18n } from '@/i18n'
 import { watchRouter } from './watch'
 
@@ -45,7 +54,7 @@ export const routes = [
   },
   {
     path: '/chat',
-    component: LayoutDsl,
+    component: Ai2biLayout,
     redirect: '/chat/index',
     children: [
       {
@@ -53,9 +62,103 @@ export const routes = [
         name: 'chat',
         component: chat,
         props: (route: any) => {
-          return { startChatDsId: route.query.start_chat }
+          return {
+            startChatDsId: route.query.start_chat ? Number(route.query.start_chat) : undefined,
+            newChatFlag: route.query.new_chat,
+          }
         },
-        meta: { title: t('menu.Data Q&A'), iconActive: 'chat', iconDeActive: 'noChat' },
+        meta: { title: '问数', iconActive: 'chat', iconDeActive: 'noChat' },
+      },
+    ],
+  },
+  {
+    path: '/assets',
+    component: Ai2biLayout,
+    redirect: '/assets/index',
+    children: [
+      {
+        path: 'index',
+        name: 'assets',
+        component: Ai2biAssets,
+        meta: { title: '数据资产', iconActive: 'ds', iconDeActive: 'noDs' },
+      },
+    ],
+  },
+  {
+    path: '/tables',
+    component: Ai2biLayout,
+    redirect: '/tables/index',
+    children: [
+      {
+        path: 'index',
+        name: 'tables',
+        component: Ai2biTables,
+        meta: { title: '表管理', iconActive: 'model', iconDeActive: 'noModel' },
+      },
+    ],
+  },
+  {
+    path: '/metrics',
+    component: Ai2biLayout,
+    redirect: '/metrics/index',
+    children: [
+      {
+        path: 'index',
+        name: 'metrics',
+        component: Ai2biMetrics,
+        meta: { title: '指标管理', iconActive: 'workspace', iconDeActive: 'noWorkspace' },
+      },
+    ],
+  },
+  {
+    path: '/skill-dev',
+    component: Ai2biLayout,
+    redirect: '/skill-dev/index',
+    children: [
+      {
+        path: 'index',
+        name: 'skill-dev',
+        component: Ai2biSkillDev,
+        meta: { title: 'Skill 开发', iconActive: 'set', iconDeActive: 'noSet' },
+      },
+    ],
+  },
+  {
+    path: '/memory',
+    component: Ai2biLayout,
+    redirect: '/memory/index',
+    children: [
+      {
+        path: 'index',
+        name: 'memory',
+        component: Ai2biMemory,
+        meta: { title: '我的记忆', iconActive: 'log', iconDeActive: 'noLog' },
+      },
+    ],
+  },
+  {
+    path: '/data-dev',
+    component: Ai2biLayout,
+    redirect: '/data-dev/index',
+    children: [
+      {
+        path: 'index',
+        name: 'data-dev',
+        component: Ai2biDataDev,
+        meta: { title: '数据开发', iconActive: 'model', iconDeActive: 'noModel' },
+      },
+    ],
+  },
+  {
+    path: '/agents',
+    component: Ai2biLayout,
+    redirect: '/agents/index',
+    children: [
+      {
+        path: 'index',
+        name: 'agents',
+        component: Ai2biAgents,
+        meta: { title: 'Agent 管理' },
       },
     ],
   },
@@ -89,6 +192,7 @@ export const routes = [
     path: '/dashboard',
     component: LayoutDsl,
     redirect: '/dashboard/index',
+    meta: { hidden: true },
     children: [
       {
         path: 'index',
@@ -107,7 +211,7 @@ export const routes = [
     name: 'set',
     component: LayoutDsl,
     redirect: '/set/member',
-    meta: { title: t('workspace.set'), iconActive: 'set', iconDeActive: 'noSet' },
+    meta: { title: t('workspace.set'), iconActive: 'set', iconDeActive: 'noSet', hidden: true },
     children: [
       {
         path: '/set/member',

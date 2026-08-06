@@ -1,4 +1,3 @@
-import { ElMessage } from 'element-plus-secondary'
 import { useCache } from '@/utils/useCache'
 import { useAppearanceStoreWithOut } from '@/stores/appearance'
 import { useUserStore } from '@/stores/user'
@@ -18,7 +17,7 @@ export const watchRouter = (router: Router) => {
   router.beforeEach(async (to: any, from: any, next: any) => {
     await loadXpackStatic()
     await appearanceStore.setAppearance()
-    LicenseGenerator.generateRouters(router)
+    window.LicenseGenerator?.generateRouters?.(router)
     if (to.path.startsWith('/login') && userStore.getUid) {
       next(to?.query?.redirect || '/')
       return
@@ -33,9 +32,18 @@ export const watchRouter = (router: Router) => {
       return
     }
     if (!token) {
-      // ElMessage.error('Please login first')
-      next(toLoginPage(to.fullPath))
-      return
+      // Community edition: auto mock-login instead of redirecting to login page
+      try {
+        const res: any = await request.post('/login/mock')
+        userStore.setToken(res.access_token)
+        await userStore.info()
+        generateDynamicRouters(router)
+        next('/chat')
+        return
+      } catch (e) {
+        next(toLoginPage(to.fullPath))
+        return
+      }
     }
     if (!userStore.getUid) {
       await userStore.info()
@@ -78,21 +86,6 @@ const isWsAdminRouter = (to?: any) => {
   return wsAdminRouterList.some((item: string) => to?.path?.startsWith(item))
 }
 const loadXpackStatic = () => {
-  if (document.getElementById('sqlbot_xpack_static')) {
-    return Promise.resolve()
-  }
-  const url = `/xpack_static/license-generator.umd.js?t=${Date.now()}`
-  return new Promise((resolve, reject) => {
-    request
-      .loadRemoteScript(url, 'sqlbot_xpack_static', () => {
-        LicenseGenerator?.init(import.meta.env.VITE_API_BASE_URL).then(() => {
-          resolve(true)
-        })
-      })
-      .catch((error) => {
-        console.error('Failed to load xpack_static script:', error)
-        ElMessage.error('Failed to load license generator script')
-        reject(error)
-      })
-  })
+  // Skip xpack license script loading (community edition)
+  return Promise.resolve()
 }

@@ -38,7 +38,15 @@ wlist = [
     "/system/authentication/sso/*",
     "/system/platform/sso/*",
     "/system/platform/client/*",
-    "/system/parameter/login"
+    "/system/parameter/login",
+    "/system/license",
+    "/system/license/version",
+    "/system/appearance/ui",
+    "/login/mock",
+    "/ai2bi/*",
+    "/assets/*",
+    "/assets/",
+    "/assets"
 ]
 
 class WhitelistChecker:

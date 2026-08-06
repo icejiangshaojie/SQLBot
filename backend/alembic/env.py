@@ -27,6 +27,7 @@ config = context.config
 #from apps.chat.models.chat_model import SQLModel
 from apps.terminology.models.terminology_model import SQLModel
 from sqlbot_xpack.custom_prompt.models.custom_prompt_model import SQLModel
+from apps.ai2bi.asset_models import SQLModel  # noqa: 数据资产元数据
 #from apps.data_training.models.data_training_model import SQLModel
 # from apps.dashboard.models.dashboard_model import SQLModel
 from common.core.config import settings # noqa

@@ -45,6 +45,8 @@ export class ChatRecord {
   chart?: string
   analysis?: string
   analysis_thinking?: string
+  evidence_qa?: any  // AI2BI: 质检结果 {passed, violations, evidence_summary}
+  knowledge_answer?: string  // AI2BI: 知识问答模式回答（不生成 SQL）
   predict?: string
   predict_content?: string
   predict_data?: string | any

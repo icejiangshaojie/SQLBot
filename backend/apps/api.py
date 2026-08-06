@@ -8,6 +8,7 @@ from apps.mcp import mcp
 from apps.system.api import login, user, aimodel, workspace, assistant, parameter, apikey, variable_api
 from apps.terminology.api import terminology
 from apps.settings.api import base
+from apps.ai2bi.api import router as ai2bi_router
 #from audit.api import audit_api
 
 
@@ -31,5 +32,6 @@ api_router.include_router(apikey.router)
 api_router.include_router(recommended_problem.router)
 
 api_router.include_router(variable_api.router)
+api_router.include_router(ai2bi_router)
 
 #api_router.include_router(audit_api.router)

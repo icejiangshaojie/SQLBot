@@ -1,6 +1,6 @@
 <template>
   <el-icon
-    v-if="assistantStore.assistant && !assistantStore.pageEmbedded && assistantStore.type != 4"
+    v-if="false && assistantStore.assistant && !assistantStore.pageEmbedded && assistantStore.type != 4"
     class="show-history_icon"
     :class="{ 'embedded-history-hidden': embeddedHistoryHidden }"
     size="20"
@@ -31,7 +31,7 @@
     </el-aside>
 
     <div
-      v-if="(!isCompletePage && !pageEmbedded) || !chatListSideBarShow"
+      v-if="false && ((!isCompletePage && !pageEmbedded) || !chatListSideBarShow)"
       class="hidden-sidebar-btn"
       :class="{
         'assistant-popover-sidebar': !isCompletePage && !pageEmbedded,
@@ -449,7 +449,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Chat, chatApi, ChatInfo, type ChatMessage, ChatRecord } from '@/api/chat'
 import ChatRow from './ChatRow.vue'
 import ChartAnswer from './answer/ChartAnswer.vue'
@@ -486,6 +487,7 @@ import { useChatConfigStore } from '@/stores/chatConfig.ts'
 const userStore = useUserStore()
 const props = defineProps<{
   startChatDsId?: number
+  newChatFlag?: string
   welcomeDesc?: string
   logoAssistant?: string
   welcome?: string
@@ -711,7 +713,7 @@ function onChatRenamed(chat: Chat) {
   console.info('renamed', chat)
 }
 
-const chatListSideBarShow = ref<boolean>(true)
+const chatListSideBarShow = ref<boolean>(false)
 function hideSideBar() {
   if ((!isCompletePage.value && !props.pageEmbedded) || isPhone.value) {
     floatPopoverVisible.value = false
@@ -721,11 +723,8 @@ function hideSideBar() {
 }
 
 function showSideBar() {
-  if (isPhone.value) {
-    showFloatPopover()
-    return
-  }
-  chatListSideBarShow.value = true
+  // AI2BI: sidebar managed by Ai2biLayout, disable chat's own sidebar
+  return
 }
 
 function onChatCreatedQuick(chat: ChatInfo) {
@@ -1114,17 +1113,6 @@ defineExpose({
 
 const hiddenChatCreatorRef = ref()
 
-function jumpCreatChat() {
-  if (props.startChatDsId) {
-    const _id = props.startChatDsId
-    nextTick(() => {
-      hiddenChatCreatorRef.value?.createChat(_id)
-    })
-    const newUrl = window.location.hash.replace(/\?.*$/, '')
-    history.replaceState({}, '', newUrl)
-  }
-}
-
 onMounted(() => {
   chatConfig.fetchGlobalConfig()
   if (isPhone.value) {
@@ -1133,9 +1121,64 @@ onMounted(() => {
       registerClickOutside()
     }
   }
-  getChatList(jumpCreatChat)
+  // AI2BI: check if this is a new chat request from external sidebar
+  const route = useRoute()
+  if (route.query.new_chat) {
+    // Fresh chat — reset state, don't load existing session
+    currentChat.value = new ChatInfo()
+    currentChatId.value = undefined
+    getChatList()
+    assistantPrepareInit()
+    return
+  }
+  getChatList(() => {
+    if (props.startChatDsId) {
+      loadExistingChat(props.startChatDsId)
+    }
+  })
   assistantPrepareInit()
 })
+
+// AI2BI: watch startChatDsId to switch sessions from external sidebar
+watch(() => props.startChatDsId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    loadExistingChat(newId)
+  }
+})
+
+// AI2BI: new chat is handled via onMounted + route.query.new_chat + router-view :key
+
+// AI2BI: load an existing chat by ID (not create new)
+function loadExistingChat(chatId: any) {
+  const numId = Number(chatId)
+  if (!numId) return
+  const existing = chatList.value.find((c: any) => c.id === numId)
+  if (existing) {
+    currentChat.value = new ChatInfo(existing)
+    currentChatId.value = numId
+    loading.value = true
+    chatApi.get(numId).then((res: any) => {
+      const info = chatApi.toChatInfo(res)
+      if (info && info.id === numId) {
+        currentChat.value = info
+      }
+    }).finally(() => {
+      loading.value = false
+    })
+  } else {
+    // Chat not in list yet — try loading directly
+    currentChatId.value = numId
+    loading.value = true
+    chatApi.get(numId).then((res: any) => {
+      const info = chatApi.toChatInfo(res)
+      if (info) {
+        currentChat.value = info
+      }
+    }).finally(() => {
+      loading.value = false
+    })
+  }
+}
 </script>
 
 <style lang="less" scoped>

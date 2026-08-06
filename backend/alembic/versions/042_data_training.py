@@ -9,7 +9,11 @@ from alembic import op
 import sqlalchemy as sa
 import sqlmodel.sql.sqltypes
 from sqlalchemy.dialects import postgresql
-import pgvector
+try:
+    import pgvector
+    HAS_PGVECTOR = False
+except ImportError:
+    HAS_PGVECTOR = False
 
 # revision identifiers, used by Alembic.
 revision = 'a487d9c69341'
@@ -27,7 +31,7 @@ def upgrade():
     sa.Column('create_time', sa.DateTime(), nullable=True),
     sa.Column('question', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
     sa.Column('description', sa.Text(), nullable=True),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(), nullable=True),
+    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR() if HAS_PGVECTOR else sa.Text(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
 

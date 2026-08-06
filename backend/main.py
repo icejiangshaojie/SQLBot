@@ -52,10 +52,11 @@ async def lifespan(app: FastAPI):
     run_migrations()
     init_sqlbot_cache()
     init_dynamic_cors(app)
-    init_terminology_embedding_data()
-    init_data_training_embedding_data()
-    init_table_and_ds_embedding()
-    SQLBotLogUtil.info("✅ SQLBot 初始化完成")
+    # Skip embedding init — model path not available on Windows (Docker path /opt/sqlbot/models/...)
+    # init_terminology_embedding_data()
+    # init_data_training_embedding_data()
+    # init_table_and_ds_embedding()
+    SQLBotLogUtil.info("✅ AI2BI 初始化完成（embedding 已跳过）")
     await sqlbot_xpack.core.clean_xpack_cache()
     await async_model_info()  # 异步加密已有模型的密钥和地址
     await sqlbot_xpack.core.monitor_app(app)
@@ -179,16 +180,19 @@ images_path = settings.MCP_IMAGE_PATH
 os.makedirs(images_path, exist_ok=True)
 mcp_app.mount("/images", StaticFiles(directory=images_path), name="images")
 
-mcp = FastApiMCP(
-    app,
-    name="SQLBot MCP Server",
-    description="SQLBot MCP Server",
-    describe_all_responses=True,
-    describe_full_response_schema=True,
-    include_operations=["mcp_datasource_list", "get_model_list", "mcp_question", "mcp_start", "mcp_assistant", "mcp_ws_list"]
-)
-
-mcp.mount(mcp_app)
+try:
+    mcp = FastApiMCP(
+        app,
+        name="SQLBot MCP Server",
+        description="SQLBot MCP Server",
+        describe_all_responses=True,
+        describe_full_response_schema=True,
+        include_operations=["mcp_datasource_list", "get_model_list", "mcp_question", "mcp_start", "mcp_assistant", "mcp_ws_list"]
+    )
+    mcp.mount(mcp_app)
+except Exception as e:
+    print(f"[WARN] MCP setup skipped: {e}")
+    mcp = None
 
 # Set all CORS enabled origins
 if settings.all_cors_origins:
@@ -206,13 +210,79 @@ app.add_middleware(RequestContextMiddleware)
 app.add_middleware(RequestContextMiddlewareCommon)
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# --- Community edition stub endpoints (xpack replacement) ---
+from fastapi.responses import JSONResponse as _JR
+from datetime import timedelta as _td
+from common.core.security import create_access_token as _cat
+from common.core.config import settings as _cfg
+from sqlmodel import Session as _Session, select as _select
+from common.core.db import engine as _engine
+from apps.system.models.user import UserModel as _UserModel
+
+@app.get(f"{settings.API_V1_STR}/system/license")
+async def _license_info():
+    return _JR({"code": 0, "data": {"status": "valid", "type": "community", "edition": "Community"}, "msg": None})
+
+@app.get(f"{settings.API_V1_STR}/system/license/version")
+async def _license_version():
+    return _JR({"code": 0, "data": {"version": "1.0.0", "edition": "Community"}, "msg": None})
+
+@app.get(f"{settings.API_V1_STR}/system/parameter/login")
+async def _login_default():
+    return _JR({"code": 0, "data": [], "msg": None})
+
+@app.get(f"{settings.API_V1_STR}/system/appearance/ui")
+async def _appearance_ui():
+    return _JR([])
+
+@app.post(f"{settings.API_V1_STR}/login/mock")
+async def _mock_login():
+    """Mock login - returns a real JWT for the admin user without password."""
+    with _Session(_engine) as session:
+        stmt = _select(_UserModel).where(_UserModel.account == "admin")
+        db_user = session.exec(stmt).first()
+        if not db_user:
+            return _JR({"detail": "Admin user not found"}, status_code=400)
+        user_dict = {"id": db_user.id, "account": db_user.account, "oid": db_user.oid}
+        token = _cat(user_dict, expires_delta=_td(minutes=_cfg.ACCESS_TOKEN_EXPIRE_MINUTES))
+    return {"access_token": token, "token_type": "bearer"}
+
 # Register exception handlers
 app.add_exception_handler(StarletteHTTPException, exception_handler.http_exception_handler)
 app.add_exception_handler(Exception, exception_handler.global_exception_handler)
 
-mcp.setup_server()
+if mcp:
+    try:
+        mcp.setup_server()
+    except Exception as e:
+        print(f"[WARN] MCP server setup skipped: {e}")
 
 sqlbot_xpack.init_fastapi_app(app)
+
+# Serve built frontend (production mode)
+_frontend_dist = os.path.join(os.path.dirname(__file__), "frontend_dist")
+_frontend_index = os.path.join(_frontend_dist, "index.html")
+
+if os.path.exists(_frontend_dist):
+    from fastapi.responses import HTMLResponse
+
+    @app.get("/")
+    async def serve_index():
+        """Serve index.html with no-cache headers to prevent stale JS/CSS references."""
+        with open(_frontend_index, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return HTMLResponse(
+            content=content,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
+
+    # Static files + SPA fallback: serves /assets/* and falls back to index.html
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
+
 if __name__ == "__main__":
     import uvicorn
 
