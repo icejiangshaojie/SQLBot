@@ -1339,7 +1339,6 @@ class LLMService:
 
     def run_task(self, in_chat: bool = True, stream: bool = True,
                  finish_step: ChatFinishStep = ChatFinishStep.GENERATE_CHART, return_img: bool = True):
-        print("[DEBUG] run_task started", flush=True)
         json_result: Dict[str, Any] = {'success': True}
         _session = None
         try:
@@ -1349,9 +1348,7 @@ class LLMService:
                 ds_id = self.ds.id if isinstance(self.ds, CoreDatasource) else None
 
                 self.filter_terminology_template(_session, oid, ds_id)
-
                 self.filter_training_template(_session, oid, ds_id)
-
                 self.filter_custom_prompts(_session, CustomPromptTypeEnum.GENERATE_SQL, oid, ds_id)
 
                 self.init_messages(_session)
@@ -2037,9 +2034,9 @@ def get_token_usage(chunk: BaseMessageChunk, token_usage: dict = None):
             token_usage['input_tokens'] = chunk.usage_metadata.get('input_tokens')
             token_usage['output_tokens'] = chunk.usage_metadata.get('output_tokens')
             token_usage['total_tokens'] = chunk.usage_metadata.get('total_tokens')
-            print(f"[AI2BI-DEBUG] get_token_usage captured: {token_usage}", flush=True)
+            SQLBotLogUtil.info(f"[AI2BI-DEBUG] get_token_usage captured: {token_usage}")
     except Exception as e:
-        print(f"[AI2BI-DEBUG] get_token_usage error: {e}", flush=True)
+        SQLBotLogUtil.info(f"[AI2BI-DEBUG] get_token_usage error: {e}")
 
 
 def process_stream(res: Iterator[BaseMessageChunk],

@@ -1,6 +1,7 @@
 # Author: Junjun
 # Date: 2025/9/23
 import json
+import os
 import time
 import traceback
 
@@ -17,9 +18,12 @@ def get_table_embedding(tables: list[dict], question: str):
 
     if _list:
         try:
+            model = EmbeddingModelCache.get_model()
+            if model is None:
+                return _list
+
             text = [s.get('schema_table') for s in _list]
 
-            model = EmbeddingModelCache.get_model()
             start_time = time.time()
             results = model.embed_documents(text)
             end_time = time.time()
@@ -49,13 +53,11 @@ def calc_table_embedding(tables: list[dict], question: str):
 
     if _list:
         try:
-            # text = [s.get('schema_table') for s in _list]
-            #
             model = EmbeddingModelCache.get_model()
+            if model is None:
+                return _list
+
             start_time = time.time()
-            # results = model.embed_documents(text)
-            # end_time = time.time()
-            # SQLBotLogUtil.info(str(end_time - start_time))
             results = [item.get('embedding') for item in _list]
 
             q_embedding = model.embed_query(question)
@@ -66,7 +68,6 @@ def calc_table_embedding(tables: list[dict], question: str):
 
             _list.sort(key=lambda x: x['cosine_similarity'], reverse=True)
             _list = _list[:settings.TABLE_EMBEDDING_COUNT]
-            # print(len(_list))
             end_time = time.time()
             SQLBotLogUtil.info(str(end_time - start_time))
             SQLBotLogUtil.info(json.dumps([{"id": ele.get('id'), "schema_table": ele.get('schema_table'),

@@ -7,6 +7,7 @@ from langchain_core.messages import BaseMessage, AIMessage, AIMessageChunk, Huma
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.language_models import LanguageModelInput
 from langchain_core.runnables import RunnableConfig
+from common.utils.utils import SQLBotLogUtil
 
 
 class ChatAnthropicCompat(BaseChatModel):
@@ -140,5 +141,5 @@ class ChatAnthropicCompat(BaseChatModel):
             "output_tokens": _output_tokens,
             "total_tokens": _input_tokens + _output_tokens,
         }
-        print(f"[AI2BI-DEBUG] Anthropic stream done: input_tokens={_input_tokens}, output_tokens={_output_tokens}, total={_input_tokens + _output_tokens}", flush=True)
+        SQLBotLogUtil.info(f"[AI2BI-DEBUG] Anthropic stream done: input_tokens={_input_tokens}, output_tokens={_output_tokens}, total={_input_tokens + _output_tokens}")
         yield final_chunk

@@ -64,6 +64,9 @@ def save_table_embedding(session_maker, ids: List[int]):
         SQLBotLogUtil.info('start table embedding')
         start_time = time.time()
         model = EmbeddingModelCache.get_model()
+        if model is None:
+            SQLBotLogUtil.info('Embedding model not available, skipping table embedding')
+            return
         session = session_maker()
         for _id in ids:
             table = session.query(CoreTable).filter(CoreTable.id == _id).first()
@@ -116,6 +119,9 @@ def save_ds_embedding(session_maker, ids: List[int]):
         SQLBotLogUtil.info('start datasource embedding')
         start_time = time.time()
         model = EmbeddingModelCache.get_model()
+        if model is None:
+            SQLBotLogUtil.info('Embedding model not available, skipping datasource embedding')
+            return
         session = session_maker()
         for _id in ids:
             schema_table = ''

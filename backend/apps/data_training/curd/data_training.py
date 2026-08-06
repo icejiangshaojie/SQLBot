@@ -455,6 +455,8 @@ def save_embeddings(session_maker, ids: List[int]):
         _question_list = [item.question for item in _list]
 
         model = EmbeddingModelCache.get_model()
+        if model is None:
+            return
 
         results = model.embed_documents(_question_list)
 
@@ -527,19 +529,19 @@ def select_training_by_question(session: SessionDep, question: str, oid: int, da
         with session.begin_nested():
             try:
                 model = EmbeddingModelCache.get_model()
+                if model is not None:
+                    embedding = model.embed_query(question)
 
-                embedding = model.embed_query(question)
+                    if advanced_application_id is not None:
+                        results = session.execute(text(embedding_sql_in_advanced_application),
+                                                  {'embedding_array': str(embedding), 'oid': oid,
+                                                   'advanced_application': advanced_application_id})
+                    else:
+                        results = session.execute(text(embedding_sql),
+                                                  {'embedding_array': str(embedding), 'oid': oid, 'datasource': datasource})
 
-                if advanced_application_id is not None:
-                    results = session.execute(text(embedding_sql_in_advanced_application),
-                                              {'embedding_array': str(embedding), 'oid': oid,
-                                               'advanced_application': advanced_application_id})
-                else:
-                    results = session.execute(text(embedding_sql),
-                                              {'embedding_array': str(embedding), 'oid': oid, 'datasource': datasource})
-
-                for row in results:
-                    _list.append(DataTraining(id=row.id, question=row.question))
+                    for row in results:
+                        _list.append(DataTraining(id=row.id, question=row.question))
 
             except Exception:
                 traceback.print_exc()

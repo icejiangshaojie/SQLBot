@@ -33,6 +33,9 @@ def get_ds_embedding(session: SessionDep, current_user: CurrentUser, _ds_list, o
                 text = [s.get('ds_schema') for s in _list]
 
                 model = EmbeddingModelCache.get_model()
+                if model is None:
+                    return [{"id": obj.get('ds').id, "name": obj.get('ds').name, "description": obj.get('ds').description}
+                            for obj in _list]
                 results = model.embed_documents(text)
 
                 q_embedding = model.embed_query(question)
@@ -65,6 +68,9 @@ def get_ds_embedding(session: SessionDep, current_user: CurrentUser, _ds_list, o
                 # text = [s.get('ds_schema') for s in _list]
 
                 model = EmbeddingModelCache.get_model()
+                if model is None:
+                    return [{"id": obj.get('ds').id, "name": obj.get('ds').name, "description": obj.get('ds').description}
+                            for obj in _list]
                 start_time = time.time()
                 # results = model.embed_documents(text)
                 results = [item.get('embedding') for item in _list]
