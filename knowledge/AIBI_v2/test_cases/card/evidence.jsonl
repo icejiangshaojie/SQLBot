@@ -1,0 +1,2 @@
+{"question": "7月卡消费金额按HK/MCV拆分", "expected_evidence_count": 4, "expected_tag_types": ["[SQL]"], "forbid_model_inferred": true, "type": "evidence"}
+{"question": "7月消费笔数同比上月变化", "expected_evidence_count": 2, "expected_tag_types": ["[SQL]", "[计算]"], "forbid_model_inferred": true, "type": "evidence"}

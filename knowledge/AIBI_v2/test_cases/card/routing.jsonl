@@ -1,0 +1,7 @@
+{"question": "7月卡消费总金额是多少", "expected_agent": "card_agent", "expected_tables": ["dwd_fct_retail_cust_card_auth_d_delta_aiview"], "type": "routing"}
+{"question": "本月MPAU月活是多少", "expected_agent": "card_agent", "expected_tables": ["dwd_fct_retail_cust_card_auth_d_delta_aiview"], "type": "routing"}
+{"question": "NTB新户首刷转化率", "expected_agent": "card_agent", "expected_tables": ["dim_card_ntb_tag_d", "dwd_fct_retail_cust_card_auth_d_delta_aiview"], "type": "routing"}
+{"question": "KPI目标达成率如何", "expected_agent": "card_agent", "expected_tables": [], "type": "routing"}
+{"question": "MCC商户排名Top10", "expected_agent": "card_agent", "expected_tables": ["dwd_fct_retail_cust_card_auth_d_delta_aiview"], "type": "routing"}
+{"question": "对公外汇交易量", "expected_agent": null, "type": "routing_negative"}
+{"question": "最近系统有什么更新", "expected_agent": null, "type": "routing_negative"}

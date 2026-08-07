@@ -1,0 +1,85 @@
+# 卡域分析 Agent 定义
+
+agent_code: card_agent
+agent_name: 卡域分析 Agent
+vertical: retail_card
+business_line: 零售
+version: "1.3"
+status: published
+owner: shaojie.jiang
+
+# 路由信号
+entry_signals:
+  - 信用卡
+  - 借记卡
+  - 刷卡
+  - 消费
+  - MPAU
+  - NTB
+  - Stockback
+  - 百万劲抽
+  - 回赠
+  - MCC
+  - Visa
+  - 卡消费
+  - 月活
+  - 新户
+  - 首刷
+  - KPI
+
+# 能力边界
+capabilities:
+  - knowledge_qa       # 可回答业务知识问题（卡域定义、指标口径、表说明）
+  - data_query         # 可生成 SQL 取数
+  - data_analysis      # 可基于结果做分析（趋势、结构、排名、异常）
+
+# 分析模板
+analysis_templates:
+  - trend              # 趋势分析（按日/周/月）
+  - structure_split    # 结构拆分（HK/MCV、产品线）
+  - ranking            # 排名（MCC Top N、商户排名）
+  - anomaly            # 异常检测（金额突增/突降）
+
+# 绑定 Skills
+skills:
+  - card/director/SKILL.md
+  - card/card_trans/SKILL.md
+  - card/mpau_analysis/SKILL.md
+  - card/ntb_analysis/SKILL.md
+  - card/kpi_monitoring/SKILL.md
+  - card/card_partnership/SKILL.md
+  - _shared/hk_mcv_split/SKILL.md
+  - _shared/success_auth_filter/SKILL.md
+  - _shared/partition_rules/SKILL.md
+
+# 数据合同 — 专属表
+exclusive_tables:
+  - dwd_fct_retail_cust_card_auth_d_delta_aiview
+  - dws_card_cust_trans_date_income_cost_d_aiview
+
+# 数据合同 — 共享基座表
+shared_tables:
+  - dim_cust_basic_info_ext_d_aiview
+  - dim_card_ntb_tag_d
+
+# 指标绑定
+metric_ids: [1, 2, 3, 4]
+
+# 隔离规则
+isolation_rules: |
+  零售 card 域禁止使用对公 cust_no 口径和对公 hub 表
+  HK/MCV 拆分不适用于对公客户
+  所有卡消费查询必须过滤 is_successful_auth = 1
+  所有查询必须包含 pt 分区条件
+
+# 质检配置
+qa_config:
+  check_evidence: true
+  check_numeric_consistency: true
+  block_unsourced_numbers: true
+  required_filters:
+    - is_successful_auth
+    - pt
+
+# 测试集
+test_cases: test_cases/card/

@@ -20,11 +20,11 @@ from common.core.db import engine
 
 logger = logging.getLogger(__name__)
 
-# AIBI_v2 仓库根目录
+# AIBI_v2 知识库根目录（已并入 SQLBot/knowledge/AIBI_v2）
 import os
 AIBI_V2_ROOT = Path(os.environ.get(
     "AIBI_V2_ROOT",
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "AIBI_v2")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "knowledge", "AIBI_v2")
 )).resolve()
 
 

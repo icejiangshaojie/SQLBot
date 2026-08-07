@@ -1,0 +1,45 @@
+scenario: card
+scenario_name: 卡域分析
+owner: shaojie.jiang
+version: "1.0"
+business_line: 零售
+status: dev
+entry_signals:
+  - 信用卡
+  - 借记卡
+  - 刷卡
+  - 消费
+  - MPAU
+  - NTB
+  - Stockback
+  - 百万劲抽
+  - 回赠
+  - MCC
+  - Visa
+  - 卡消费
+sub_intents:
+  - {id: card_trans, skill: card_trans/SKILL.md, desc: 卡消费金额/笔数/MCC/商户}
+  - {id: mpau_analysis, skill: mpau_analysis/SKILL.md, desc: MPAU 月活成分}
+  - {id: ntb_analysis, skill: ntb_analysis/SKILL.md, desc: NTB 首刷转化}
+  - {id: kpi_monitoring, skill: kpi_monitoring/SKILL.md, desc: KPI 达成监控}
+  - {id: card_partnership, skill: card_partnership/SKILL.md, desc: 商户活动分析}
+tables:
+  - {name: dwd_fct_retail_cust_card_auth_d_delta, project: zabank_dw, snapshot: delta, usage: 卡授权明细}
+  - {name: dim_card_ntb_tag_d, project: zabank_dw, snapshot: full, usage: NTB 标签}
+  - {name: dim_cust_basic_info_ext_d, project: zabank_dw, snapshot: full, usage: 客户基础信息(HK/MCV拆分)}
+metrics:
+  - {name: 卡消费金额, formula: "SUM(trans_amt_hkd)", note: 成功授权且视场景排除ATM}
+  - {name: 卡消费笔数, formula: "COUNT(*)", note: 成功授权}
+  - {name: MPAU, formula: "COUNT(DISTINCT cust_no)", note: 月活用户数}
+  - {name: NTB首刷率, formula: "首刷客户数/新开户数", note: 分母走dim_card_ntb_tag_d}
+hard_filters:
+  - "is_successful_auth = 1"
+  - "trans_channel <> 'ATM' (NTB首消场景)"
+depends_global:
+  - ODPS只读
+  - 敏感信息脱敏
+  - 默认LIMIT
+not_applicable:
+  - "对公卡不属于零售卡域"
+  - "HK/MCV拆分不适用于对公客户"
+isolation: "零售card域禁止使用对公cust_no口径和对公hub表"

@@ -14,6 +14,7 @@
 | [05-页面与交互设计](./05-页面与交互设计.md) | 产品、前端、设计 | 工作台和治理页面如何组织 |
 | [06-权限证据与治理规则](./06-权限证据与治理规则.md) | 安全、研发、数据治理 | 如何保证数据、结论和资产可控 |
 | [07-开发路线图](./07-开发路线图.md) | 项目负责人、研发 | 按什么顺序落地及如何验收 |
+| [10-Q2/Q1/Q3专题分析框架开发计划](./10-Q2-Q1-Q3专题分析框架开发计划.md) | 项目负责人、研发、前端 | Q2 意图门控、Q1 执行详情与 Q3 专题分析如何串起来 |
 | [08-业务知识录入手册](./08-业务知识录入手册.md) | 业务同事、数据负责人 | 如何新增一个业务域、指标或 Skill |
 | [09-Phase0接口合同](./09-Phase0接口合同.md) | 研发、测试、前后端 | Phase 0 已实现的运行合同（状态/QA/SSE/持久化） |
 
@@ -32,5 +33,7 @@
 现有系统已经提供聊天问数、SQL 执行、图表、AI2BI 管理页面、Agent、Skill、资产字典、Evidence 和 QA 的基础。当前仍处在“SQLBot 主链路上增强 AI2BI”的阶段：部分规则只进入模型 Prompt，部分资产有文件和数据库双来源。
 
 **Phase 0 已落地**：单结果集确定性分析引擎（`analysis_engine.py`）、`passed/warning/blocked` QA 闭环（`qa_checker.py`）、Evidence Facts/QA/状态持久化（`evidence_builder.py` + 迁移 075）、聊天内分析面板与证据抽屉、统一 SSE 解码、前端 vitest 单测（20 例）、MCP 流式/非流式持久化均已实现并提交（commit f97fc185）。运行时合同见 [09-Phase0接口合同](./09-Phase0接口合同.md)。
+
+**业务知识库已并入**：原独立仓库 `AIBI_v2` 的业务知识（domain/skills/data/metrics/agents/test_cases）已并入本仓库 `knowledge/AIBI_v2/`，由后端通过 `AIBI_V2_ROOT` 环境变量加载（默认指向 `SQLBot/knowledge/AIBI_v2`），详见 [../../knowledge/AIBI_v2/README.md](../../knowledge/AIBI_v2/README.md)。
 
 本目录描述的是目标运行合同，并为现有模块的渐进演进提供路径，不要求一次性重写 SQLBot。

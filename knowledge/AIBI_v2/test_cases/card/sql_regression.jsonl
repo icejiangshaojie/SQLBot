@@ -1,0 +1,3 @@
+{"question": "7月卡消费总金额", "expected_tables": ["dwd_fct_retail_cust_card_auth_d_delta"], "expected_sql_patterns": ["is_successful_auth", "pt"], "expected_filters": ["is_successful_auth = 1"], "type": "sql_regression"}
+{"question": "按HK/MCV拆分消费金额", "expected_tables": ["dwd_fct_retail_cust_card_auth_d_delta", "dim_cust_basic_info_ext_d"], "expected_sql_patterns": ["cust_sub_type", "is_successful_auth", "pt"], "expected_filters": ["is_successful_auth = 1"], "type": "sql_regression"}
+{"question": "MCC消费Top10", "expected_tables": ["dwd_fct_retail_cust_card_auth_d_delta"], "expected_sql_patterns": ["mcc", "ORDER BY", "LIMIT", "is_successful_auth"], "expected_filters": ["is_successful_auth = 1"], "type": "sql_regression"}

@@ -35,7 +35,7 @@ router = APIRouter(tags=["ai2bi"], prefix="/ai2bi", include_in_schema=False)
 
 AIBI_V2_ROOT = Path(os.environ.get(
     "AIBI_V2_ROOT",
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "AIBI_v2")
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "knowledge", "AIBI_v2")
 )).resolve()
 
 def _session():
@@ -592,6 +592,11 @@ async def get_evidence(record_id: int):
             "model_inferred": _json.loads(ev.model_inferred) if ev.model_inferred else [],
             "analysis_status": ev.analysis_status,
             "analysis_error": ev.analysis_error,
+            "analysis_intent": _json.loads(ev.analysis_intent) if ev.analysis_intent else None,
+            "topic_contract": _json.loads(ev.topic_contract) if ev.topic_contract else None,
+            "topic_plan": _json.loads(ev.topic_plan) if ev.topic_plan else None,
+            "topic_bp_output": _json.loads(ev.topic_bp_output) if ev.topic_bp_output else None,
+            "topic_queries": _json.loads(ev.topic_queries) if ev.topic_queries else [],
             "analysis_facts": _json.loads(ev.analysis_facts) if ev.analysis_facts else [],
             "qa_result": _json.loads(ev.qa_result) if ev.qa_result else None,
             "analysis_output": ev.analysis_output,
