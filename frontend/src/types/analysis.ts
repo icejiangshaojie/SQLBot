@@ -9,6 +9,26 @@ export type AnalysisRunStatus =
   | 'started'
   | 'generating'
 
+export type AnalysisIntentType =
+  | 'knowledge'
+  | 'data_lookup'
+  | 'chart_only'
+  | 'analysis'
+  | 'topic_analysis'
+  | 'prediction'
+  | 'unsupported'
+
+// Q2 分析意图快照 — 与后端 apps/ai2bi/analysis_intent.py 对齐
+export interface AnalysisIntent {
+  intent_type: AnalysisIntentType
+  analysis_required: boolean
+  chart_required: boolean
+  contract_required: boolean
+  confidence: number
+  reason: string
+  signals: string[]
+}
+
 export type FactSource = 'sql' | 'backend_calc' | 'model_inferred'
 
 export interface AnalysisFact {
@@ -80,6 +100,11 @@ export interface EvidenceDetail {
   model_inferred?: any[]
   analysis_status?: AnalysisRunStatus | null
   analysis_error?: string | null
+  analysis_intent?: AnalysisIntent | null
+  topic_contract?: TopicContract | null
+  topic_plan?: TopicPlan | null
+  topic_bp_output?: BpOutput | null
+  topic_queries?: TopicQueryResult[]
   analysis_facts?: AnalysisFact[]
   qa_result?: QaResult | null
   analysis_output?: string | null
@@ -132,3 +157,54 @@ export type ChatSseEvent =
   | EvidenceReadyEvent
   | AnalysisErrorEvent
   | { type: string; [k: string]: any }
+
+// ── Q3 专题分析类型 ──────────────────────────────
+
+export interface TopicContract {
+  question: string
+  intent_type: string
+  agent_ref?: string | null
+  topic_template?: string | null
+  metrics: string[]
+  time_range?: Record<string, any>
+  population?: string | null
+  dimensions: string[]
+  mandatory_filters: string[]
+  comparison_baseline?: string | null
+  status: string
+}
+
+export interface TopicQueryResult {
+  query_id: string
+  purpose: string
+  required: boolean
+  status: string
+  sql?: string | null
+  row_count?: number
+  result_hash?: string | null
+  error?: string | null
+}
+
+export interface TopicPlan {
+  plan_id: string
+  mode: string
+  max_queries: number
+  queries: TopicQueryResult[]
+  operators: string[]
+  limits: Record<string, any>
+}
+
+export interface BpFinding {
+  category: string
+  text: string
+  fact_ids: string[]
+  query_ids: string[]
+}
+
+export interface BpOutput {
+  executive_summary: BpFinding[]
+  findings: BpFinding[]
+  limitations: string[]
+  next_questions: string[]
+  markdown?: string | null
+}

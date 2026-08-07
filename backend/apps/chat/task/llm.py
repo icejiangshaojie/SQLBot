@@ -1274,7 +1274,7 @@ class LLMService:
                 err = traceback.format_exc(limit=1, chain=True)
                 raise SQLBotDBError(err)
 
-    def generate_evidence_analysis(self, session: Session, context: 'AnalysisContext') -> 'AnalysisResult':  # noqa: F821
+    def generate_evidence_analysis(self, session: Session, context: 'AnalysisContext', intent: dict | None = None) -> 'AnalysisResult':  # noqa: F821
         """
         AI2BI Phase 0：统一证据分析入口。
 
@@ -1284,6 +1284,7 @@ class LLMService:
         - 分析不依赖图表是否成功。
         - blocked QA 下不保存/不回传 LLM 正文；SQL 结果与图表仍保留。
         - 返回 AnalysisResult，由 run_task 负责 SSE 事件。
+        - intent：Q2 意图快照，持久化到 Evidence，解释为什么触发/跳过分析。
         """
         import time
 
@@ -1321,7 +1322,7 @@ class LLMService:
                 qa=result_qa,
                 reason="SQL 未返回数据，无法分析。",
             )
-            self._save_phase0_evidence(session, context, result, pack)
+            self._save_phase0_evidence(session, context, result, pack, intent)
             return result
 
         # 4. 加载分析模板
@@ -1349,7 +1350,7 @@ class LLMService:
                 error=str(e),
                 qa=result_qa,
             )
-            self._save_phase0_evidence(session, context, result, pack)
+            self._save_phase0_evidence(session, context, result, pack, intent)
             return result
 
         # 6. QA（含答案级）
@@ -1363,7 +1364,7 @@ class LLMService:
                 qa=qa,
                 reason="分析因质检不通过被阻断",
             )
-            self._save_phase0_evidence(session, context, result, pack)
+            self._save_phase0_evidence(session, context, result, pack, intent)
             return result
 
         result = AnalysisResult(
@@ -1389,10 +1390,10 @@ class LLMService:
             except Exception as e:
                 SQLBotLogUtil.info(f"AI2BI save analysis answer failed: {e}")
 
-        self._save_phase0_evidence(session, context, result, pack)
+        self._save_phase0_evidence(session, context, result, pack, intent)
         return result
 
-    def _save_phase0_evidence(self, session, context, result, pack):
+    def _save_phase0_evidence(self, session, context, result, pack, intent=None):
         """持久化证据记录（含 Facts、QA、状态、分析文本）。"""
         try:
             from apps.ai2bi.evidence_builder import save_evidence_record
@@ -1411,6 +1412,7 @@ class LLMService:
                 analysis_status=result.status.value,
                 analysis_error=result.error,
                 analysis_output=result.final_text,
+                analysis_intent=intent,
                 result_hash=pack.get('result_hash'),
                 agent_snapshot=context.route_info.get('agent') if isinstance(context.route_info, dict) else None,
                 model_name=result.metadata.get('model_name'),
@@ -1511,6 +1513,145 @@ class LLMService:
         except Exception as e:
             SQLBotLogUtil.info(f"AI2BI load qa config failed: {e}")
             return default
+
+    def _run_topic_analysis(self, session: Session, context: 'AnalysisContext', intent: dict) -> 'TopicAnalysisResult':
+        """AI2BI Q3 专题分析：合同 -> 计划 -> 多查询 -> BP Agent -> QA -> 持久化。"""
+        import time
+
+        from apps.ai2bi.analysis_contract import (
+            AnalysisStatus, TopicAnalysisResult,
+        )
+        from apps.ai2bi.analysis_planner import build_topic_contract, build_topic_plan
+        from apps.ai2bi.analysis_orchestrator import run_topic_plan
+        from apps.ai2bi.bp_agent import run_bp_analysis
+        from apps.ai2bi.qa_checker import run_bp_qa
+
+        started = time.time()
+
+        # 1. 生成合同与计划
+        contract = build_topic_contract(context.question)
+        if contract.status == "needs_confirmation":
+            _result = TopicAnalysisResult(
+                status=AnalysisStatus.SKIPPED,
+                contract=contract,
+                reason="专题口径不明确，需确认后执行。",
+                metadata={'intent': intent},
+            )
+            self._save_topic_evidence(session, context, _result, intent, contract=None, plan=None)
+            return _result
+
+        plan = build_topic_plan(context.question)
+        if not plan.queries:
+            _result = TopicAnalysisResult(
+                status=AnalysisStatus.SKIPPED,
+                contract=contract,
+                reason="未匹配到可用的专题模板，无法生成分析计划。",
+                metadata={'intent': intent},
+            )
+            self._save_topic_evidence(session, context, _result, intent, contract, None)
+            return _result
+
+        # 2. 执行多查询（SQL 由 LLM 生成，执行复用主链路）
+        def _sql_gen(question: str, ctx: str, purpose: str) -> str:
+            return self._generate_topic_sql(question, ctx or context.route_info.get('context_prompt', ''), purpose)
+
+        def _sql_exec(sql: str) -> dict:
+            return self.execute_sql(sql)
+
+        topic = run_topic_plan(
+            plan, context.question, context.route_info.get('context_prompt', '') or '',
+            _sql_gen, _sql_exec, context.metric_context,
+        )
+
+        # 3. BP Agent 归纳发现
+        bp = run_bp_analysis(topic.facts, contract.model_dump(mode="json") if contract else None)
+        topic.bp_output = bp
+
+        # 4. QA
+        topic.qa = run_bp_qa(bp, topic.facts)
+
+        # 状态修正
+        if topic.qa.status == "blocked":
+            topic.status = AnalysisStatus.BLOCKED
+        elif topic.qa.status == "warning":
+            topic.status = AnalysisStatus.COMPLETED
+
+        topic.metadata['intent'] = intent
+        topic.metadata['duration_ms'] = int((time.time() - started) * 1000)
+
+        # 5. 持久化
+        self._save_topic_evidence(session, context, topic, intent, topic.contract, topic.plan)
+        return topic
+
+    def _generate_topic_sql(self, question: str, context_prompt: str, purpose: str) -> str:
+        """用 LLM 生成一条专题查询 SQL。失败返回空串。"""
+        try:
+            from langchain_core.messages import HumanMessage as LC_HumanMessage
+            from langchain_core.messages import SystemMessage
+            system = (
+                "你是 ZA Bank 数据分析 SQL 生成器。只生成只读 SELECT 语句，禁止预测、禁止非 SELECT。\n"
+                "仅使用给定上下文中的表与字段。输出纯 SQL，不要解释。\n"
+                f"<context>\n{context_prompt[:4000]}\n</context>"
+            )
+            user = f"用户问题: {question}\n本次查询用途: {purpose}\n请生成一条聚合 SQL（含时间过滤与成功授权过滤）。"
+            token_usage = {}
+            res = process_stream(self.llm.stream([
+                SystemMessage(content=system),
+                LC_HumanMessage(content=user),
+            ]), token_usage)
+            full = ''
+            for chunk in res:
+                if chunk.get('content'):
+                    full += chunk.get('content')
+            full = full.strip()
+            # 提取 SQL 代码块
+            import re as _re
+            m = _re.search(r'```sql\s*(.*?)\s*```', full, _re.DOTALL | _re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+            if full.lower().startswith('select'):
+                return full
+            return ''
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI topic sql gen failed: {e}")
+            return ''
+
+    def _save_topic_evidence(self, session, context, topic: 'TopicAnalysisResult', intent, contract, plan):
+        """持久化 Q3 专题分析证据。"""
+        try:
+            from apps.ai2bi.evidence_builder import save_evidence_record
+            bp = topic.bp_output
+            plan_dict = plan.model_dump(mode="json") if plan else None
+            contract_dict = contract.model_dump(mode="json") if contract else None
+            save_evidence_record(
+                session=session,
+                record_id=self.record.id,
+                chat_id=self.record.chat_id,
+                source_record_id=context.source_record_id or context.record_id,
+                route_info=context.route_info,
+                sql=context.sql,
+                result=context.result,
+                metric_context=context.metric_context,
+                facts=topic.facts,
+                qa_result=topic.qa.model_dump(mode="json") if topic.qa else None,
+                analysis_status=topic.status.value,
+                analysis_error=topic.error,
+                analysis_output=(bp.markdown if bp else None),
+                analysis_intent=intent,
+                result_hash=context.result and self._result_hash(context.result),
+                agent_snapshot=context.route_info.get('agent') if isinstance(context.route_info, dict) else None,
+                qa_passed=(topic.qa.status == "passed") if topic.qa else None,
+                qa_violations=([f.message for f in topic.qa.findings if f.severity == 'block'] if topic.qa else None),
+                topic_contract=contract_dict,
+                topic_plan=plan_dict,
+                topic_bp_output=bp.model_dump(mode="json") if bp else None,
+                topic_queries=([q.model_dump(mode="json") for q in plan.queries] if plan else None),
+                model_name=getattr(self.config, 'model_name', None),
+                total_tokens=topic.metadata.get('total_tokens', 0),
+                duration_ms=topic.metadata.get('duration_ms'),
+            )
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI topic evidence save failed: {e}")
 
     def pop_chunk(self):
         try:
@@ -1875,13 +2016,100 @@ class LLMService:
 
                 if in_chat:
                     yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_start'}).decode() + '\n\n'
+
+                # AI2BI Q2: 分析意图门控 — 仅明确分析意图才进入分析链路
+                from apps.ai2bi.analysis_intent import classify_intent
+                from apps.ai2bi.analysis_contract import AnalysisStatus, AnalysisResult, QaResult
+
+                _intent = classify_intent(self.chat_question.question)
+                if in_chat:
+                    yield 'data:' + orjson.dumps({
+                        'type': 'analysis_intent',
+                        **{k: _intent[k] for k in ('intent_type', 'analysis_required', 'chart_required', 'contract_required', 'confidence', 'reason', 'signals')},
+                    }).decode() + '\n\n'
+
+                if not _intent.get('analysis_required'):
+                    # 纯取数/画图/知识/预测：不产出经营结论
+                    _skipped_result = AnalysisResult(
+                        status=AnalysisStatus.SKIPPED,
+                        facts=[],
+                        qa=QaResult(
+                            status="passed",
+                            findings=[],
+                            summary={},
+                            renderable=False,
+                        ),
+                        final_text=None,
+                        reason=f"未触发分析：{_intent.get('reason', '')}",
+                        metadata={'intent': _intent},
+                    )
+                    _skipped_pack = {
+                        'result_hash': self._result_hash(result),
+                    }
+                    self._save_phase0_evidence(_session, _analysis_context, _skipped_result, _skipped_pack, _intent)
+                    if in_chat:
+                        yield 'data:' + orjson.dumps({
+                            'type': 'analysis_status',
+                            'status': 'skipped',
+                            'message': _skipped_result.reason,
+                        }).decode() + '\n\n'
+                        yield 'data:' + orjson.dumps({
+                            'type': 'evidence_ready',
+                            'record_id': self.record.id,
+                            'status': 'skipped',
+                        }).decode() + '\n\n'
+                        yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_skipped'}).decode() + '\n\n'
+                    # 跳过分析正文 SSE，直接到 finish
+                    if in_chat:
+                        yield 'data:' + orjson.dumps({'type': 'finish'}).decode() + '\n\n'
+                    else:
+                        if not stream:
+                            yield json_result
+                    return
+
+                if in_chat:
                     yield 'data:' + orjson.dumps({
                         'type': 'analysis_status',
                         'status': 'started',
                         'message': '开始分析',
                     }).decode() + '\n\n'
 
-                _analysis_result = self.generate_evidence_analysis(_session, _analysis_context)
+                # AI2BI Q3: 专题分析走多查询编排
+                if _intent.get('intent_type') == 'topic_analysis':
+                    _topic_result = self._run_topic_analysis(_session, _analysis_context, _intent)
+                    if in_chat:
+                        yield 'data:' + orjson.dumps({
+                            'type': 'analysis_status',
+                            'status': _topic_result.status.value,
+                            'message': _topic_result.reason or _topic_result.error or '',
+                        }).decode() + '\n\n'
+                        if _topic_result.qa is not None:
+                            yield 'data:' + orjson.dumps({
+                                'content': orjson.dumps(_topic_result.qa.model_dump(mode="json")).decode(),
+                                'type': 'evidence_qa',
+                            }).decode() + '\n\n'
+                        if _topic_result.bp_output is not None and _topic_result.bp_output.markdown:
+                            yield 'data:' + orjson.dumps({
+                                'content': _topic_result.bp_output.markdown,
+                                'type': 'analysis',
+                            }).decode() + '\n\n'
+                        yield 'data:' + orjson.dumps({
+                            'type': 'evidence_ready',
+                            'record_id': self.record.id,
+                            'status': _topic_result.status.value,
+                        }).decode() + '\n\n'
+                        yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_done'}).decode() + '\n\n'
+                    else:
+                        if not stream:
+                            yield json_result
+                    if in_chat:
+                        yield 'data:' + orjson.dumps({'type': 'finish'}).decode() + '\n\n'
+                    else:
+                        if not stream:
+                            yield json_result
+                    return
+
+                _analysis_result = self.generate_evidence_analysis(_session, _analysis_context, _intent)
 
                 # SSE 事件：基于 AnalysisResult 输出
                 if in_chat:

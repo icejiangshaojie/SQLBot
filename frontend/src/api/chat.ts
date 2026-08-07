@@ -46,6 +46,7 @@ export class ChatRecord {
   analysis?: string
   analysis_thinking?: string
   analysis_status?: string
+  analysis_intent?: any  // AI2BI Q2: 分析意图快照 {intent_type, analysis_required, reason, ...}
   evidence_qa?: any  // AI2BI: 质检结果 {status, findings, summary}
   knowledge_answer?: string  // AI2BI: 知识问答模式回答（不生成 SQL）
   predict?: string
@@ -293,6 +294,9 @@ const toChatRecord = (data?: any): ChatRecord | undefined => {
   // AI2BI Phase 0：水合历史记录的 QA 与知识回答（原有构造器遗漏）
   if (data.evidence_qa !== undefined) {
     record.evidence_qa = data.evidence_qa
+  }
+  if (data.analysis_intent !== undefined) {
+    record.analysis_intent = data.analysis_intent
   }
   if (data.knowledge_answer !== undefined) {
     record.knowledge_answer = data.knowledge_answer

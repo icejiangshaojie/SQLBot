@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AnalysisRunPanel from '@/views/chat/analysis/AnalysisRunPanel.vue'
-import type { QaResult } from '@/types/analysis'
+import type { QaResult, AnalysisIntent } from '@/types/analysis'
 
 function qa(status: QaResult['status']): QaResult {
   return {
@@ -78,5 +78,47 @@ describe('AnalysisRunPanel 状态投影', () => {
   it('message 属性渲染提示文案', () => {
     const wrapper = mount(AnalysisRunPanel, { props: { status: 'failed', message: '分析引擎异常' } })
     expect(wrapper.text()).toContain('分析引擎异常')
+  })
+})
+
+describe('AnalysisRunPanel 意图投影（Q2）', () => {
+  const chartIntent: AnalysisIntent = {
+    intent_type: 'chart_only',
+    analysis_required: false,
+    chart_required: true,
+    contract_required: false,
+    confidence: 0.8,
+    reason: '用户只要求画图展示，未提出分析诉求，不产出经营结论。',
+    signals: ['chart'],
+  }
+
+  it('chart_only 显示意图标签"图表展示"', () => {
+    const wrapper = mount(AnalysisRunPanel, { props: { status: 'skipped', intent: chartIntent } })
+    expect(wrapper.text()).toContain('图表展示')
+  })
+
+  it('skipped 且无分析意图时展示意图原因', () => {
+    const wrapper = mount(AnalysisRunPanel, { props: { status: 'skipped', intent: chartIntent } })
+    expect(wrapper.text()).toContain('未提出分析诉求')
+  })
+
+  it('analysis 意图显示"基础分析"标签', () => {
+    const intent: AnalysisIntent = {
+      intent_type: 'analysis',
+      analysis_required: true,
+      chart_required: true,
+      contract_required: false,
+      confidence: 0.8,
+      reason: '用户提出分析诉求',
+      signals: ['analysis'],
+    }
+    const wrapper = mount(AnalysisRunPanel, { props: { status: 'completed', intent } })
+    expect(wrapper.text()).toContain('基础分析')
+  })
+
+  it('无 intent 时不渲染意图标签', () => {
+    const wrapper = mount(AnalysisRunPanel, { props: { status: 'completed' } })
+    expect(wrapper.text()).not.toContain('图表展示')
+    expect(wrapper.text()).not.toContain('基础分析')
   })
 })

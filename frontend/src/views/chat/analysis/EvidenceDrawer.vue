@@ -95,6 +95,22 @@ function factType(fact: AnalysisFact): string {
         <span v-if="evidence.analysis_error">{{ evidence.analysis_error }}</span>
       </el-alert>
 
+      <!-- 意图快照（Q2） -->
+      <section v-if="evidence.analysis_intent" class="sec">
+        <h4>分析意图</h4>
+        <el-descriptions :column="1" size="small">
+          <el-descriptions-item label="类型">
+            {{ evidence.analysis_intent.intent_type }}
+          </el-descriptions-item>
+          <el-descriptions-item label="是否触发分析">
+            {{ evidence.analysis_intent.analysis_required ? '是' : '否' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="判断原因">
+            {{ evidence.analysis_intent.reason }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </section>
+
       <!-- 路由 -->
       <section v-if="evidence.route_info" class="sec">
         <h4>路由</h4>

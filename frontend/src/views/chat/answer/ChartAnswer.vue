@@ -4,9 +4,10 @@ import { Chat, chatApi, ChatInfo, type ChatMessage, ChatRecord, questionApi } fr
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChartBlock from '@/views/chat/chat-block/ChartBlock.vue'
 import { createSseDecoder } from '@/utils/sse'
-import type { QaResult } from '@/types/analysis'
+import type { QaResult, AnalysisIntent, BpOutput } from '@/types/analysis'
 import AnalysisRunPanel from '@/views/chat/analysis/AnalysisRunPanel.vue'
-import EvidenceDrawer from '@/views/chat/analysis/EvidenceDrawer.vue'
+import ExecutionDetailsPanel from '@/views/chat/analysis/ExecutionDetailsPanel.vue'
+import TopicAnalysisPanel from '@/views/chat/analysis/TopicAnalysisPanel.vue'
 import MdComponent from '@/views/chat/component/MdComponent.vue'
 import { ai2biApi } from '@/api/ai2bi'
 
@@ -93,7 +94,9 @@ const stopFlag = ref(false)
 const analysisStatus = ref('')
 const analysisMessage = ref('')
 const analysisQa = ref<QaResult | null>(null)
-const evidenceDrawerVisible = ref(false)
+const analysisIntent = ref<AnalysisIntent | null>(null)
+const topicBp = ref<BpOutput | null>(null)
+const topicContract = ref<any | null>(null)
 
 const sendMessage = async () => {
   stopFlag.value = false
@@ -229,13 +232,19 @@ const sendMessage = async () => {
               case 'finish':
                 emits('finish', currentRecord.id)
                 break
-              case 'analysis_status':
-                analysisStatus.value = data.status || ''
-                analysisMessage.value = data.message || ''
-                if (data.status) {
-                  currentRecord.analysis_status = data.status
-                }
-                break
+case 'analysis_intent':
+                  analysisIntent.value = data as unknown as AnalysisIntent
+                  if (data.intent_type) {
+                    currentRecord.analysis_intent = data
+                  }
+                  break
+                case 'analysis_status':
+                  analysisStatus.value = data.status || ''
+                  analysisMessage.value = data.message || ''
+                  if (data.status) {
+                    currentRecord.analysis_status = data.status
+                  }
+                  break
               case 'evidence_ready':
                 analysisStatus.value = data.status || analysisStatus.value
                 break
@@ -308,6 +317,10 @@ function restoreAnalysisState() {
         analysisStatus.value = d.analysis_status
         rec.analysis_status = d.analysis_status
       }
+      if (d.analysis_intent) {
+        analysisIntent.value = d.analysis_intent as AnalysisIntent
+        rec.analysis_intent = d.analysis_intent
+      }
       if (d.qa_result) {
         analysisQa.value = d.qa_result as QaResult
         rec.evidence_qa = d.qa_result
@@ -316,10 +329,26 @@ function restoreAnalysisState() {
     .catch(() => {})
 }
 
+function loadTopicState() {
+  // 历史刷新：懒加载 Q3 专题分析的结构化输出（BP 发现/口径/计划）
+  const rec = props.message?.record
+  if (!rec?.id) return
+  ai2biApi
+    .getEvidence(rec.id)
+    .then((res: any) => {
+      const d = res?.data ?? res
+      if (!d?.found) return
+      if (d.topic_bp_output) topicBp.value = d.topic_bp_output as BpOutput
+      if (d.topic_contract) topicContract.value = d.topic_contract
+    })
+    .catch(() => {})
+}
+
 onMounted(() => {
   if (props.message?.record?.id && props.message?.record?.finish) {
     getChatData(props.message.record.id)
     restoreAnalysisState()
+    loadTopicState()
   }
 })
 
@@ -346,6 +375,7 @@ defineExpose({ sendMessage, index: () => index.value, stop })
       :status="analysisStatus || message?.record?.analysis_status"
       :message="analysisMessage"
       :qa="analysisQa || (message?.record?.evidence_qa as any)"
+      :intent="analysisIntent || (message?.record?.analysis_intent as any)"
       :datasource-name="message?.record?.datasource ? String(message.record.datasource) : ''"
       :row-count="message?.record?.data?.fields?.length"
     />
@@ -353,16 +383,20 @@ defineExpose({ sendMessage, index: () => index.value, stop })
     <div v-if="message?.record?.analysis" class="ai2bi-analysis">
       <MdComponent :message="message.record.analysis" />
     </div>
-    <!-- AI2BI: 证据链入口 -->
-    <div v-if="message?.record?.id" class="ai2bi-evidence-chain">
-      <el-button size="small" text type="primary" @click="evidenceDrawerVisible = true">
-        📋 查看证据链
-      </el-button>
-    </div>
-    <EvidenceDrawer
-      v-model="evidenceDrawerVisible"
-      :record-id="message?.record?.id"
-    />
+    <!-- AI2BI Q3: 专题分析结构化发现 -->
+    <TopicAnalysisPanel :bp="topicBp" :contract="topicContract" />
+    <!-- AI2BI Q1: 执行详情（数据/图表/SQL/证据链/QA/路由与资产） -->
+    <el-collapse class="execution-details-wrap">
+      <el-collapse-item :title="`执行详情${analysisStatus ? ' · ' + analysisStatus : ''}`" name="exec-detail">
+        <ExecutionDetailsPanel
+          :record-id="message?.record?.id"
+          :message="message"
+          :loading-data="loadingData"
+          v-model:show-label="showLabel"
+          v-model:thousands-separator-list="enableThousandsSeparatorList"
+        />
+      </el-collapse-item>
+    </el-collapse>
     <slot></slot>
     <template #tool>
       <slot name="tool"></slot>
@@ -420,22 +454,18 @@ defineExpose({ sendMessage, index: () => index.value, stop })
     :deep(code) { font-family: 'Consolas', monospace; }
   }
 }
-.ai2bi-evidence-chain {
+.execution-details-wrap {
   margin-top: 8px;
-  padding: 12px 16px;
-  background: #f8f9fa;
-  border-radius: 12px;
   border: 1px solid rgba(222, 224, 227, 1);
-  .evidence-title { font-size: 14px; font-weight: 500; color: rgba(31, 35, 41, 1); }
-  .evidence-detail { padding: 4px 0; }
-  .evidence-summary { margin-bottom: 8px; }
-  .evidence-tag {
-    display: inline-block; margin-right: 12px; padding: 2px 8px; border-radius: 4px; font-size: 12px;
-    &.sql { background: #e8f5e9; color: #2e7d32; }
-    &.calc { background: #e3f2fd; color: #1565c0; }
-    &.inferred { background: #fff3e0; color: #e65100; }
+  border-radius: 8px;
+  background: #ffffff;
+  :deep(.el-collapse-item__header) {
+    font-size: 13px;
+    color: #4e5969;
+    padding-left: 12px;
   }
-  .evidence-violations { margin-top: 6px; }
-  .violation-item { font-size: 14px; color: #e6a23c; margin: 4px 0; }
+  :deep(.el-collapse-item__content) {
+    padding: 0 8px 8px;
+  }
 }
 </style>

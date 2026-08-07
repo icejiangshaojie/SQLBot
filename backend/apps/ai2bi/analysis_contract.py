@@ -103,3 +103,74 @@ class AnalysisResult(BaseModel):
     error: str | None = None
     reason: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ═══ Q3 专题分析合同 ═══════════════════════════════════════════
+
+class AnalysisContract(BaseModel):
+    """Q3 用户本次专题分析的已确认口径。"""
+    question: str
+    intent_type: str = "topic_analysis"
+    agent_ref: str | None = None
+    topic_template: str | None = None
+    metrics: list[str] = Field(default_factory=list)
+    time_range: dict[str, Any] = Field(default_factory=dict)
+    population: str | None = None
+    dimensions: list[str] = Field(default_factory=list)
+    mandatory_filters: list[str] = Field(default_factory=list)
+    comparison_baseline: str | None = None
+    status: str = "inferred"  # inferred | needs_confirmation | confirmed
+
+
+class PlanQuery(BaseModel):
+    """一条计划查询。"""
+    query_id: str
+    purpose: str
+    required: bool = False
+    status: str = "pending"  # pending | running | completed | failed | data_insufficient
+    sql: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+    result_hash: str | None = None
+    row_count: int = 0
+    facts: list[AnalysisFact] = Field(default_factory=list)
+    error: str | None = None
+
+
+class AnalysisPlan(BaseModel):
+    """Q3 专题分析计划：受控多查询。"""
+    plan_id: str
+    mode: str = "topic_analysis"
+    max_queries: int = 3
+    queries: list[PlanQuery] = Field(default_factory=list)
+    operators: list[str] = Field(default_factory=list)
+    limits: dict[str, Any] = Field(default_factory=dict)
+
+
+class BpFinding(BaseModel):
+    """Q3 BP Agent 的一条发现。"""
+    category: str = "general"  # summary/trend/structure/comparison/anomaly/limitation
+    text: str
+    fact_ids: list[str] = Field(default_factory=list)
+    query_ids: list[str] = Field(default_factory=list)
+
+
+class BpOutput(BaseModel):
+    """Q3 BP Agent 的结构化输出。"""
+    executive_summary: list[BpFinding] = Field(default_factory=list)
+    findings: list[BpFinding] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    next_questions: list[str] = Field(default_factory=list)
+    markdown: str | None = None
+
+
+class TopicAnalysisResult(BaseModel):
+    """Q3 专题分析最终结果。"""
+    status: AnalysisStatus
+    contract: AnalysisContract | None = None
+    plan: AnalysisPlan | None = None
+    facts: list[AnalysisFact] = Field(default_factory=list)
+    bp_output: BpOutput | None = None
+    qa: QaResult | None = None
+    error: str | None = None
+    reason: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

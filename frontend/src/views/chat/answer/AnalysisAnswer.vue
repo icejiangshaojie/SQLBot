@@ -3,7 +3,7 @@ import BaseAnswer from './BaseAnswer.vue'
 import { chatApi, ChatInfo, type ChatMessage, ChatRecord } from '@/api/chat.ts'
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import MdComponent from '@/views/chat/component/MdComponent.vue'
-import EvidenceDrawer from '@/views/chat/analysis/EvidenceDrawer.vue'
+import ExecutionDetailsPanel from '@/views/chat/analysis/ExecutionDetailsPanel.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -79,7 +79,6 @@ const _loading = computed({
 })
 
 const stopFlag = ref(false)
-const evidenceDrawerVisible = ref(false)
 const sendMessage = async () => {
   stopFlag.value = false
   _loading.value = true
@@ -212,12 +211,11 @@ defineExpose({ sendMessage, index: () => index.value, chatList: () => _chatList.
     :loading="_loading"
   >
     <MdComponent :message="message.record?.analysis" style="margin-top: 12px" />
-    <div v-if="message?.record?.id" style="margin-top: 8px">
-      <el-button size="small" text type="primary" @click="evidenceDrawerVisible = true">
-        📋 查看证据链
-      </el-button>
-    </div>
-    <EvidenceDrawer v-model="evidenceDrawerVisible" :record-id="message?.record?.id" />
+    <el-collapse class="execution-details-wrap">
+      <el-collapse-item title="执行详情" name="exec-detail">
+        <ExecutionDetailsPanel :record-id="message?.record?.id" :message="message" />
+      </el-collapse-item>
+    </el-collapse>
     <slot></slot>
     <template #tool>
       <slot name="tool"></slot>
@@ -228,4 +226,19 @@ defineExpose({ sendMessage, index: () => index.value, chatList: () => _chatList.
   </BaseAnswer>
 </template>
 
-<style scoped lang="less"></style>
+<style scoped lang="less">
+.execution-details-wrap {
+  margin-top: 8px;
+  border: 1px solid rgba(222, 224, 227, 1);
+  border-radius: 8px;
+  background: #ffffff;
+  :deep(.el-collapse-item__header) {
+    font-size: 13px;
+    color: #4e5969;
+    padding-left: 12px;
+  }
+  :deep(.el-collapse-item__content) {
+    padding: 0 8px 8px;
+  }
+}
+</style>

@@ -305,3 +305,93 @@ def _is_in_sql_block(text: str, number: float) -> bool:
         if num_str in block:
             return True
     return False
+
+
+# ── Q3 BP Agent 输出质检 ──────────────────────────
+
+def check_bp_output(bp_output, facts: list[AnalysisFact]) -> tuple[list[dict], dict]:
+    """校验 BP Agent 的结构化输出。
+
+    规则：
+    - 每个 finding 的 fact_ids 必须能在 facts 中找到 -> 否则 warning。
+    - 无任何已完成查询/已验证事实时产出发现 -> block。
+    - 摘要/发现中的数字必须来自 facts -> 否则 warning。
+
+    Returns:
+        (findings, summary)
+    """
+    findings: list[dict] = []
+    summary = {
+        "bp_findings": 0,
+        "bp_limitations": 0,
+        "bp_valid_fact_refs": 0,
+        "bp_invalid_fact_refs": 0,
+    }
+
+    if bp_output is None:
+        return findings, summary
+
+    all_findings = list(bp_output.executive_summary or []) + list(bp_output.findings or [])
+    summary["bp_findings"] = len(all_findings)
+
+    valid_fact_ids = {f.fact_id for f in facts if f.status == FactStatus.VERIFIED}
+
+    summary["bp_limitations"] = len(bp_output.limitations or [])
+
+    for item in all_findings:
+        refs = item.fact_ids or []
+        if not refs:
+            findings.append(_find(
+                "bp_no_fact_ref", "warning",
+                f"BP 发现缺少 fact_ids 引用：{item.text[:50]}",
+            ))
+            summary["bp_invalid_fact_refs"] += 1
+            continue
+        missing = [r for r in refs if r not in valid_fact_ids]
+        if missing:
+            findings.append(_find(
+                "bp_invalid_fact_ref", "warning",
+                f"BP 发现引用了不存在的事实：{missing}",
+                fact_ids=list(refs),
+            ))
+            summary["bp_invalid_fact_refs"] += 1
+        else:
+            summary["bp_valid_fact_refs"] += 1
+
+    # 有发现但无任何已验证事实支撑 -> block
+    if all_findings and not valid_fact_ids:
+        findings.append(_find(
+            "bp_no_verified_facts", "block",
+            "BP 输出了发现，但没有任何已验证事实支撑。",
+        ))
+
+    return findings, summary
+
+
+def run_bp_qa(bp_output, facts: list[AnalysisFact]) -> QaResult:
+    """BP Agent 输出的综合 QA，返回 QaResult。"""
+    findings, summary = check_bp_output(bp_output, facts)
+    blocks = [f for f in findings if f.get("severity") == "block"]
+    warnings = [f for f in findings if f.get("severity") == "warning"]
+    status = "passed"
+    if blocks:
+        status = "blocked"
+    elif warnings:
+        status = "warning"
+    qa_summary = {
+        "sql_facts": sum(1 for f in facts if f.source_type == FactSource.SQL),
+        "backend_facts": sum(1 for f in facts if f.source_type == FactSource.BACKEND),
+        "model_facts": sum(1 for f in facts if f.source_type == FactSource.MODEL),
+        "data_insufficient": sum(1 for f in facts if f.status == FactStatus.DATA_INSUFFICIENT),
+        "sourced_numbers": 0,
+        "derived_count": 0,
+        "inferred_count": 0,
+        "unsourced_count": 0,
+        **summary,
+    }
+    return QaResult(
+        status=status,
+        findings=[QaFinding(**f) for f in findings],
+        summary=qa_summary,
+        renderable=status in ("passed", "warning"),
+    )

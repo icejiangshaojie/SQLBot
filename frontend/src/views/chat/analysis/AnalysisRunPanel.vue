@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { AnalysisRunStatus, QaResult } from '@/types/analysis'
+import type { AnalysisIntent, AnalysisRunStatus, QaResult } from '@/types/analysis'
 
 const props = withDefaults(
   defineProps<{
     status?: string
     message?: string
     qa?: QaResult | null
+    intent?: AnalysisIntent | null
     agentName?: string
     datasourceName?: string
     rowCount?: number
@@ -15,6 +16,7 @@ const props = withDefaults(
     status: '',
     message: '',
     qa: null,
+    intent: null,
     agentName: '',
     datasourceName: '',
     rowCount: undefined,
@@ -35,6 +37,19 @@ const statusMeta = computed(() => {
 })
 
 const qaSummary = computed(() => props.qa?.summary)
+
+const intentLabel = computed(() => {
+  const map: Record<string, string> = {
+    knowledge: '知识问答',
+    data_lookup: '直接取数',
+    chart_only: '图表展示',
+    analysis: '基础分析',
+    topic_analysis: '专题分析',
+    prediction: '预测(不支持)',
+    unsupported: '意图不明',
+  }
+  return props.intent ? map[props.intent.intent_type] || props.intent.intent_type : ''
+})
 </script>
 
 <template>
@@ -45,12 +60,19 @@ const qaSummary = computed(() => props.qa?.summary)
           {{ statusMeta.icon }} {{ statusMeta.label }}
         </el-tag>
       </span>
+      <span v-if="intentLabel" class="meta">
+        <el-tag size="small" type="info" effect="plain">{{ intentLabel }}</el-tag>
+      </span>
       <span v-if="agentName" class="meta">Agent: {{ agentName }}</span>
       <span v-if="datasourceName" class="meta">数据源: {{ datasourceName }}</span>
       <span v-if="rowCount !== undefined" class="meta">行数: {{ rowCount }}</span>
     </div>
 
     <div v-if="message" class="message">{{ message }}</div>
+
+    <div v-if="intent && !intent.analysis_required" class="intent-note">
+      {{ intent.reason }}
+    </div>
 
     <div v-if="qa" class="qa-row">
       <el-tag
@@ -120,6 +142,16 @@ function levelText(sev: string): string {
   .message {
     margin-top: 6px;
     color: #4e5969;
+  }
+
+  .intent-note {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: #f0f4ff;
+    border-left: 3px solid #165dff;
+    border-radius: 4px;
+    color: #4e5969;
+    font-size: 12px;
   }
 
   .qa-row {

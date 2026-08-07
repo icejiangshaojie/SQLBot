@@ -46,6 +46,14 @@ class Ai2biEvidence(SQLModel, table=True):
     # 分析状态与结果
     analysis_status: str | None = Field(default=None, sa_column=Column(String(32)))
     analysis_error: str | None = Field(default=None, sa_column=Column(Text))
+    # JSON: AnalysisIntent（Q2 意图识别快照，解释为什么触发/跳过分析）
+    analysis_intent: str | None = Field(default=None, sa_column=Column(Text))
+
+    # Q3 专题分析
+    topic_contract: str | None = Field(default=None, sa_column=Column(Text))
+    topic_plan: str | None = Field(default=None, sa_column=Column(Text))
+    topic_bp_output: str | None = Field(default=None, sa_column=Column(Text))
+    topic_queries: str | None = Field(default=None, sa_column=Column(Text))
     # JSON list: AnalysisFact[]（确定性分析事实）
     analysis_facts: str | None = Field(default=None, sa_column=Column(Text))
     # JSON: QaResult
