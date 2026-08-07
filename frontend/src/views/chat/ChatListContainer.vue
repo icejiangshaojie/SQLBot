@@ -9,6 +9,7 @@ import ChatCreator from '@/views/chat/ChatCreator.vue'
 import { useAssistantStore } from '@/stores/assistant'
 import icon_sidebar_outlined from '@/assets/svg/icon_sidebar_outlined.svg'
 import icon_new_chat_outlined from '@/assets/svg/icon_new_chat_outlined.svg'
+import icon_folder_outlined from '@/assets/svg/icon_folder.svg'
 import { useUserStore } from '@/stores/user'
 import router from '@/router'
 const userStore = useUserStore()
@@ -37,6 +38,7 @@ const emits = defineEmits([
   'onClickHistory',
   'onChatDeleted',
   'onChatRenamed',
+  'onChatArchived',
   'onClickSideBarBtn',
   'update:loading',
   'update:chatList',
@@ -80,14 +82,25 @@ const _chatList = computed({
 })
 
 const computedChatList = computed<Array<ChatInfo>>(() => {
+  let list = _chatList.value
+  if (viewMode.value === 'archived') {
+    list = list.filter((c) => c.is_archived)
+  } else {
+    list = list.filter((c) => !c.is_archived)
+  }
   if (search.value && search.value.length > 0) {
-    return filter(_chatList.value, (c) =>
+    return list.filter((c) =>
       includes(c.brief?.toLowerCase(), search.value?.toLowerCase())
     )
   } else {
-    return _chatList.value
+    return list
   }
 })
+
+const viewMode = ref<'active' | 'archived'>('active')
+function toggleViewMode() {
+  viewMode.value = viewMode.value === 'active' ? 'archived' : 'active'
+}
 
 const _loading = computed({
   get() {
@@ -214,6 +227,18 @@ function onChatRenamed(chat: Chat) {
   }
   emits('onChatRenamed', chat)
 }
+
+function onChatArchived(id: number) {
+  for (let i = 0; i < _chatList.value.length; i++) {
+    if (_chatList.value[i].id === id) {
+      _chatList.value[i].is_archived = true
+      break
+    }
+  }
+  if (id === _currentChatId.value) {
+    goEmpty()
+  }
+}
 </script>
 
 <template>
@@ -232,6 +257,16 @@ function onChatRenamed(chat: Chat) {
           <icon_new_chat_outlined />
         </el-icon>
         {{ t('qa.new_chat') }}
+      </el-button>
+      <el-button
+        class="btn archive-toggle"
+        :class="{ 'is-archived': viewMode === 'archived' }"
+        @click="toggleViewMode"
+      >
+        <el-icon style="margin-right: 6px">
+          <icon_folder_outlined />
+        </el-icon>
+        {{ viewMode === 'archived' ? t('dashboard.archived_view') : t('dashboard.archive') }}
       </el-button>
       <el-input
         v-model="search"
@@ -253,9 +288,11 @@ function onChatRenamed(chat: Chat) {
         v-model:loading="_loading"
         :current-chat-id="_currentChatId"
         :chat-list="computedChatList"
+        :archived-view="viewMode === 'archived'"
         @chat-selected="onClickHistory"
         @chat-deleted="onChatDeleted"
         @chat-renamed="onChatRenamed"
+        @chat-archived="onChatArchived"
       />
     </el-main>
 

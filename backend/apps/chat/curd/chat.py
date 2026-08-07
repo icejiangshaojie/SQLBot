@@ -41,11 +41,27 @@ def get_chat(session: SessionDep, chat_id: int) -> Chat:
     return chat
 
 
-def list_chats(session: SessionDep, current_user: CurrentUser) -> List[Chat]:
+def list_chats(session: SessionDep, current_user: CurrentUser, archived: Optional[bool] = None) -> List[Chat]:
     oid = current_user.oid if current_user.oid is not None else 1
-    chart_list = session.query(Chat).filter(and_(Chat.create_by == current_user.id, Chat.oid == oid)).order_by(
-        Chat.create_time.desc()).all()
+    query = session.query(Chat).filter(and_(Chat.create_by == current_user.id, Chat.oid == oid))
+    if archived is True:
+        query = query.filter(Chat.is_archived == True)  # noqa: E712
+    elif archived is False:
+        query = query.filter(Chat.is_archived == False)  # noqa: E712
+    chart_list = query.order_by(Chat.create_time.desc()).all()
     return chart_list
+
+
+def archive_chat_with_user(session: SessionDep, current_user: CurrentUser, chart_id: int, archived: bool) -> bool:
+    chat = session.get(Chat, chart_id)
+    if not chat:
+        raise Exception(f"Chat with id {chart_id} not found")
+    if chat.create_by != current_user.id:
+        raise Exception(f"Chat with id {chart_id} not Owned by the current user")
+    chat.is_archived = archived
+    session.add(chat)
+    session.commit()
+    return chat.is_archived
 
 
 def list_recent_questions(session: SessionDep, current_user: CurrentUser, datasource_id: int) -> List[str]:

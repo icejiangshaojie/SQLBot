@@ -14,9 +14,9 @@ from apps.chat.curd.chat import delete_chat_with_user, get_chart_data_with_user,
     list_chats, get_chat_with_records, create_chat, rename_chat, \
     delete_chat, get_chat_chart_data, get_chat_predict_data, get_chat_with_records_with_data, get_chat_record_by_id, \
     format_json_data, format_json_list_data, get_chart_config, list_recent_questions, get_chat as get_chat_exec, \
-    rename_chat_with_user, get_chat_log_history, get_chart_data_with_user_live
+    rename_chat_with_user, get_chat_log_history, get_chart_data_with_user_live, archive_chat_with_user
 from apps.chat.models.chat_model import CreateChat, ChatRecord, RenameChat, ChatQuestion, AxisObj, QuickCommand, \
-    ChatInfo, Chat, ChatFinishStep, ChatQuestionBase
+    ChatInfo, Chat, ChatFinishStep, ChatQuestionBase, ArchiveChat
 from apps.chat.task.llm import LLMService
 from apps.swagger.i18n import PLACEHOLDER_PREFIX
 from apps.system.schemas.permission import SqlbotPermission, require_permissions
@@ -30,8 +30,27 @@ router = APIRouter(tags=["Data Q&A"], prefix="/chat")
 
 
 @router.get("/list", response_model=List[Chat], summary=f"{PLACEHOLDER_PREFIX}get_chat_list")
-async def chats(session: SessionDep, current_user: CurrentUser):
-    return list_chats(session, current_user)
+async def chats(session: SessionDep, current_user: CurrentUser, archived: Optional[bool] = None):
+    return list_chats(session, current_user, archived=archived)
+
+
+@router.post("/archive", response_model=bool, summary=f"{PLACEHOLDER_PREFIX}archive_chat")
+@system_log(LogConfig(
+    operation_type=OperationType.UPDATE,
+    module=OperationModules.CHAT,
+    resource_id_expr="chat.id"
+))
+async def archive(session: SessionDep, current_user: CurrentUser, chat: ArchiveChat):
+    try:
+        return archive_chat_with_user(session=session, current_user=current_user, chart_id=chat.id,
+                                      archived=chat.is_archived)
+    except Exception as e:
+        msg = str(e)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        if "not Owned" in msg:
+            raise HTTPException(status_code=403, detail=msg)
+        raise HTTPException(status_code=500, detail=msg)
 
 
 @router.get("/{chart_id}", response_model=ChatInfo, summary=f"{PLACEHOLDER_PREFIX}get_chat")

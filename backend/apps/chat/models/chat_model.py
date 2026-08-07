@@ -98,6 +98,7 @@ class Chat(SQLModel, table=True):
     recommended_question_answer: str = Field(sa_column=Column(Text, nullable=True))
     recommended_question: str = Field(sa_column=Column(Text, nullable=True))
     recommended_generate: bool = Field(default=False)
+    is_archived: bool = Field(default=False)
 
 
 class ChatRecord(SQLModel, table=True):
@@ -174,6 +175,11 @@ class RenameChat(BaseModel):
     id: int = None
     brief: str = ''
     brief_generate: bool = True
+
+
+class ArchiveChat(BaseModel):
+    id: int = None
+    is_archived: bool = True
 
 
 class ChatInfo(BaseModel):

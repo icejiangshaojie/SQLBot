@@ -279,7 +279,12 @@
     "new_folder": "새 디렉토리 생성",
     "new_dashboard": "새 대시보드 생성",
     "add_chart": "차트 추가",
-    "chart_selected": "{0}개 선택됨"
+    "chart_selected": "{0}개 선택됨",
+    "archive": "보관",
+    "unarchive": "보관 취소",
+    "archive_success": "보관 성공",
+    "unarchive_success": "보관 취소 성공",
+    "archived_view": "보관된 대화"
   },
   "qa": {
     "retrieve_error": "콘텐츠 없음",

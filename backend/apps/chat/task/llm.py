@@ -2100,7 +2100,14 @@ class LLMService:
                         }).decode() + '\n\n'
                         yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_done'}).decode() + '\n\n'
                     else:
+                        # 非聊天非流式：把专题分析结果合并进 json_result
                         if not stream:
+                            json_result['analysis'] = (_topic_result.bp_output.markdown
+                                                       if _topic_result.bp_output is not None else '') or ''
+                            json_result['analysis_status'] = _topic_result.status.value
+                            if _topic_result.qa is not None:
+                                json_result['evidence_qa'] = _topic_result.qa.model_dump(mode="json")
+                            json_result['analysis_reason'] = _topic_result.reason or _topic_result.error or ''
                             yield json_result
                     if in_chat:
                         yield 'data:' + orjson.dumps({'type': 'finish'}).decode() + '\n\n'
@@ -2138,10 +2145,34 @@ class LLMService:
                     }).decode() + '\n\n'
                     yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_done'}).decode() + '\n\n'
                 else:
+                    # 非聊天（MCP/手动）：非流式时把分析结果合并进 json_result，避免非流式丢失分析
                     if stream and _analysis_result.final_text:
                         yield _analysis_result.final_text + '\n\n'
+                    else:
+                        json_result['analysis'] = _analysis_result.final_text or ''
+                        json_result['analysis_status'] = _analysis_result.status.value
+                        if _analysis_result.qa is not None:
+                            json_result['evidence_qa'] = _analysis_result.qa.model_dump(mode="json")
+                        json_result['analysis_reason'] = _analysis_result.reason or _analysis_result.error or ''
             except Exception as _analysis_err:
                 SQLBotLogUtil.info(f"AI2BI Analysis skipped: {_analysis_err}")
+                # AI2BI: 持久化 FAILED 状态，保证运行时异常可追溯
+                try:
+                    from apps.ai2bi.analysis_contract import AnalysisResult, AnalysisStatus
+                    from apps.ai2bi.evidence_builder import build_evidence_pack
+                    _failed_result = AnalysisResult(
+                        status=AnalysisStatus.FAILED,
+                        facts=[],
+                        error=str(_analysis_err),
+                        reason=str(_analysis_err),
+                    )
+                    _failed_pack = build_evidence_pack(
+                        _analysis_context.sql, _analysis_context.result, _analysis_context.route_info,
+                        metric_context=_analysis_context.metric_context, facts=[],
+                    )
+                    self._save_phase0_evidence(_session, _analysis_context, _failed_result, _failed_pack, _intent)
+                except Exception:
+                    pass
                 if in_chat:
                     yield 'data:' + orjson.dumps(
                         {'type': 'analysis_error', 'code': 'analysis_failed',

@@ -160,6 +160,7 @@ export class Chat {
   ds_type?: string
   recommended_question?: string | undefined
   recommended_generate?: boolean | undefined
+  is_archived?: boolean | undefined
 
   constructor()
   constructor(
@@ -240,6 +241,7 @@ export class ChatInfo extends Chat {
         this.ds_type = param1.ds_type
         this.recommended_question = recommended_question
         this.recommended_generate = recommended_generate
+        this.is_archived = param1.is_archived
       } else {
         this.id = param1
         this.create_time = getDate(create_time)
@@ -420,7 +422,7 @@ export const chatApi = {
     if (!data) {
       return undefined
     }
-    return new ChatInfo(
+    const info = new ChatInfo(
       data.id,
       data.create_time,
       data.create_by,
@@ -435,6 +437,8 @@ export const chatApi = {
       data.recommended_question,
       data.recommended_generate
     )
+    info.is_archived = data.is_archived ?? false
+    return info
   },
   toChatInfoList: (list: any[] = []): ChatInfo[] => {
     const infos: Array<ChatInfo> = []
@@ -458,8 +462,8 @@ export const chatApi = {
       toChatLogHistoryItemList(data.steps)
     )
   },
-  list: (): Promise<Array<ChatInfo>> => {
-    return request.get('/chat/list')
+  list: (params?: any): Promise<Array<ChatInfo>> => {
+    return request.get('/chat/list', { params })
   },
   get: (id: number): Promise<ChatInfo> => {
     return request.get(`/chat/${id}`)
@@ -487,6 +491,9 @@ export const chatApi = {
   },
   renameChat: (chat_id: number | undefined, brief: string): Promise<string> => {
     return request.post('/chat/rename', { id: chat_id, brief: brief })
+  },
+  archiveChat: (chat_id: number | undefined, is_archived: boolean): Promise<boolean> => {
+    return request.post('/chat/archive', { id: chat_id, is_archived })
   },
   deleteChat: (id: number | undefined, brief: any): Promise<string> => {
     return request.delete(`/chat/${id}/${brief}`)

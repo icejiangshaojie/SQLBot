@@ -279,7 +279,12 @@
     "new_folder": "New Folder",
     "new_dashboard": "New Dashboard",
     "add_chart": "Add Chart",
-    "chart_selected": "Selected {0}"
+    "chart_selected": "Selected {0}",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "archive_success": "Successfully archived",
+    "unarchive_success": "Successfully unarchived",
+    "archived_view": "Archived chats"
   },
   "qa": {
     "retrieve_error": "No content available",

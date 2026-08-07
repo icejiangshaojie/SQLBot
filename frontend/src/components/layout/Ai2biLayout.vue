@@ -5,6 +5,8 @@ import { request } from '@/utils/request'
 import Person from './Person.vue'
 import icon_side_fold_outlined from '@/assets/svg/icon_side-fold_outlined.svg'
 import icon_side_expand_outlined from '@/assets/svg/icon_side-expand_outlined.svg'
+import icon_more_outlined from '@/assets/svg/icon_more_outlined.svg'
+import icon_folder from '@/assets/svg/icon_folder.svg'
 import {
   Document, Grid, Collection, ChatDotSquare, Cpu, EditPen,
   Histogram, Notebook, Calendar, ChatRound, Star, FirstAidKit
@@ -13,17 +15,43 @@ import {
 const router = useRouter()
 const route = useRoute()
 const collapse = ref(false)
+const viewMode = ref<'active' | 'archived'>('active')
+const menuTarget = ref<any>(null)
+const menuX = ref(0)
+const menuY = ref(0)
 
 // 会话列表
 const sessions = ref<any[]>([])
 
 const loadSessions = async () => {
   try {
-    const res: any = await request.get('/chat/list')
+    const res: any = await request.get('/chat/list', { params: { archived: viewMode.value === 'archived' } })
     sessions.value = (res || []).slice(0, 30)
   } catch {
     sessions.value = []
   }
+}
+
+const toggleViewMode = () => {
+  viewMode.value = viewMode.value === 'active' ? 'archived' : 'active'
+  loadSessions()
+}
+
+const archiveSession = async (s: any) => {
+  const archived = viewMode.value === 'archived'
+  try {
+    await request.post('/chat/archive', { id: s.id, is_archived: !archived })
+    sessions.value = sessions.value.filter((x) => x.id !== s.id)
+  } catch {
+    // ignore
+  }
+}
+
+const openMenu = (e: MouseEvent, s: any) => {
+  e.stopPropagation()
+  menuTarget.value = s
+  menuX.value = Math.min(e.clientX, window.innerWidth - 120)
+  menuY.value = e.clientY
 }
 
 const startNewChat = () => {
@@ -89,6 +117,7 @@ const handleFoldExpand = () => {
 
 onMounted(() => {
   loadSessions()
+  window.addEventListener('click', () => { menuTarget.value = null })
 })
 
 watch(() => route.path, (newPath) => {
@@ -114,11 +143,25 @@ watch(() => route.path, (newPath) => {
           <el-icon size="14"><ChatRound /></el-icon>
           <span v-if="!collapse">新对话</span>
         </div>
+        <div v-if="!collapse" class="session-toolbar">
+          <span class="session-toolbar-label">{{ viewMode === 'archived' ? '归档会话' : '会话' }}</span>
+          <el-icon class="session-toolbar-icon" :class="{ active: viewMode === 'archived' }" @click="toggleViewMode">
+            <component :is="icon_folder" />
+          </el-icon>
+        </div>
         <div v-if="!collapse" class="session-list">
           <div v-for="s in sessions" :key="s.id"
-               :class="['session-item', { active: route.query.start_chat == s.id }]"
-               @click="openSession(s.id)">
-            <span class="session-brief">{{ s.brief || '新对话' }}</span>
+               class="session-item-wrap">
+            <div :class="['session-item', { active: route.query.start_chat == s.id }]"
+                 @click="openSession(s.id)">
+              <span class="session-brief">{{ s.brief || '新对话' }}</span>
+              <el-icon class="session-more" size="13" @click.stop="openMenu($event, s)">
+                <component :is="icon_more_outlined" />
+              </el-icon>
+            </div>
+          </div>
+          <div v-if="!sessions.length" class="session-empty">
+            {{ viewMode === 'archived' ? '暂无归档会话' : '暂无会话' }}
           </div>
         </div>
       </div>
@@ -152,6 +195,14 @@ watch(() => route.path, (newPath) => {
     <div class="ai2bi-main">
       <router-view :key="route.fullPath" />
     </div>
+
+    <!-- 会话右键菜单 -->
+    <div v-if="menuTarget" class="session-menu" :style="{ top: menuY + 'px', left: menuX + 'px' }">
+      <div class="session-menu-item" @click="archiveSession(menuTarget)">
+        <el-icon size="14"><component :is="icon_folder" /></el-icon>
+        {{ viewMode === 'archived' ? '取消归档' : '归档' }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -176,7 +227,7 @@ watch(() => route.path, (newPath) => {
 
   &.collapsed {
     width: 64px;
-    .logo-text, .nav-label, .new-chat-btn span:last-child, .session-list { display: none; }
+    .logo-text, .nav-label, .new-chat-btn span:last-child, .session-list, .session-toolbar { display: none; }
     .logo-area { justify-content: center; }
     .new-chat-btn { justify-content: center; }
     .nav-item { justify-content: center; }
@@ -232,6 +283,35 @@ watch(() => route.path, (newPath) => {
   overflow-y: auto;
 }
 
+.session-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 6px;
+  .session-toolbar-label {
+    font-size: 12px;
+    color: #909399;
+  }
+  .session-toolbar-icon {
+    cursor: pointer;
+    color: #c0c4cc;
+    padding: 2px;
+    &:hover { color: #1cba90; }
+    &.active { color: #1cba90; }
+  }
+}
+
+.session-item-wrap {
+  position: relative;
+}
+
+.session-empty {
+  padding: 20px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
 .session-item {
   padding: 6px 10px;
   border-radius: 6px;
@@ -241,12 +321,44 @@ watch(() => route.path, (newPath) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   &:hover { background: #ebf0f5; }
   &.active { background: #e6f7ef; color: #1cba90; }
   .session-brief {
-    display: block;
+    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .session-more {
+    display: none;
+    color: #909399;
+    flex-shrink: 0;
+    &:hover { color: #1cba90; }
+  }
+  &:hover .session-more { display: block; }
+}
+
+.session-menu {
+  position: fixed;
+  z-index: 3000;
+  background: #fff;
+  border: 1px solid #ebedf0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  min-width: 110px;
+  .session-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #4e5969;
+    cursor: pointer;
+    &:hover { background: #ebf0f5; color: #1cba90; }
   }
 }
 

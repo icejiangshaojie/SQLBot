@@ -279,7 +279,12 @@
     "new_folder": "新建目錄",
     "new_dashboard": "新建儀表板",
     "add_chart": "新增圖表",
-    "chart_selected": "已選{0}"
+    "chart_selected": "已選{0}",
+    "archive": "歸檔",
+    "unarchive": "取消歸檔",
+    "archive_success": "歸檔成功",
+    "unarchive_success": "取消歸檔成功",
+    "archived_view": "歸檔會話"
   },
   "qa": {
     "retrieve_error": "暫無內容",

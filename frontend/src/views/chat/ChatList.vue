@@ -3,6 +3,7 @@ import icon_more_outlined from '@/assets/svg/icon_more_outlined.svg'
 import icon_expand_down_filled from '@/assets/embedded/icon_expand-down_filled.svg'
 import rename from '@/assets/svg/icon_rename_outlined.svg'
 import delIcon from '@/assets/svg/icon_delete.svg'
+import archiveIcon from '@/assets/svg/icon_folder.svg'
 import { type Chat, chatApi } from '@/api/chat.ts'
 import { computed, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
@@ -15,11 +16,13 @@ const props = withDefaults(
     currentChatId?: number
     chatList: Array<Chat>
     loading?: boolean
+    archivedView?: boolean
   }>(),
   {
     currentChatId: undefined,
     chatList: () => [],
     loading: false,
+    archivedView: false,
   }
 )
 
@@ -88,7 +91,7 @@ const computedChatList = computed(() => {
   return _list
 })
 
-const emits = defineEmits(['chatSelected', 'chatRenamed', 'chatDeleted', 'update:loading'])
+const emits = defineEmits(['chatSelected', 'chatRenamed', 'chatDeleted', 'chatArchived', 'update:loading'])
 
 const _loading = computed({
   get() {
@@ -110,6 +113,30 @@ function handleCommand(command: string | number | object, chat: Chat) {
         password.id = chat.id
         password.name = chat.brief as string
         dialogVisiblePassword.value = true
+        break
+      case 'archive':
+        _loading.value = true
+        chatApi
+          .archiveChat(chat.id, !props.archivedView)
+          .then(() => {
+            ElMessage({
+              type: 'success',
+              message: props.archivedView
+                ? t('dashboard.unarchive_success')
+                : t('dashboard.archive_success'),
+            })
+            emits('chatArchived', chat.id)
+          })
+          .catch((err) => {
+            ElMessage({
+              type: 'error',
+              message: err.message,
+            })
+            console.error(err)
+          })
+          .finally(() => {
+            _loading.value = false
+          })
         break
       case 'delete':
         ElMessageBox.confirm(t('common.sales_in_2024', { msg: chat.brief }), {
@@ -236,6 +263,12 @@ const handleConfirmPassword = () => {
                     <rename></rename>
                   </el-icon>
                   {{ $t('dashboard.rename') }}
+                </div>
+                <div class="item" @click.stop="handleCommand('archive', chat)">
+                  <el-icon size="16">
+                    <archiveIcon></archiveIcon>
+                  </el-icon>
+                  {{ archivedView ? $t('dashboard.unarchive') : $t('dashboard.archive') }}
                 </div>
                 <div class="item" @click.stop="handleCommand('delete', chat)">
                   <el-icon size="16">
