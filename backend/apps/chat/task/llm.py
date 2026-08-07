@@ -4,10 +4,10 @@ import os
 import traceback
 import urllib.parse
 import warnings
-from concurrent.futures import ThreadPoolExecutor, Future
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
-from dis import specialized
-from typing import Any, List, Optional, Union, Dict, Iterator
+from typing import Any
 
 import orjson
 import pandas as pd
@@ -16,9 +16,14 @@ import sqlglot
 import sqlparse
 from langchain.chat_models.base import BaseChatModel
 from langchain_community.utilities import SQLDatabase
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, BaseMessageChunk
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    BaseMessageChunk,
+    HumanMessage,
+)
 from sqlalchemy import and_, select
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlbot_xpack.config.model import SysArgModel
 from sqlbot_xpack.custom_prompt.curd.custom_prompt import find_custom_prompts
 from sqlbot_xpack.custom_prompt.models.custom_prompt_model import CustomPromptTypeEnum
@@ -27,31 +32,74 @@ from sqlglot import exp
 from sqlmodel import Session
 
 from apps.ai_model.model_factory import LLMConfig, LLMFactory, get_default_config
-from apps.chat.curd.chat import save_question, save_sql_answer, save_sql, \
-    save_error_message, save_sql_exec_data, save_chart_answer, save_chart, \
-    finish_record, save_analysis_answer, save_predict_answer, save_predict_data, \
-    save_select_datasource_answer, save_recommend_question_answer, \
-    get_old_questions, save_analysis_predict_record, rename_chat, get_chart_config, \
-    get_chat_chart_data, list_generate_sql_logs, list_generate_chart_logs, start_log, end_log, \
-    get_last_execute_sql_error, format_json_data, format_chart_fields, get_chat_brief_generate, get_chat_predict_data, \
-    get_chat_chart_config, trigger_log_error
-from apps.chat.models.chat_model import ChatQuestion, ChatRecord, Chat, RenameChat, ChatLog, OperationEnum, \
-    ChatFinishStep, AxisObj, SystemPromptMessage, HumanPromptMessage, AIPromptMessage
+from apps.chat.curd.chat import (
+    end_log,
+    finish_record,
+    format_chart_fields,
+    format_json_data,
+    get_chart_config,
+    get_chat_brief_generate,
+    get_chat_chart_config,
+    get_chat_chart_data,
+    get_chat_predict_data,
+    get_last_execute_sql_error,
+    get_old_questions,
+    list_generate_chart_logs,
+    list_generate_sql_logs,
+    rename_chat,
+    save_analysis_answer,
+    save_analysis_predict_record,
+    save_chart,
+    save_chart_answer,
+    save_error_message,
+    save_predict_answer,
+    save_predict_data,
+    save_question,
+    save_recommend_question_answer,
+    save_select_datasource_answer,
+    save_sql,
+    save_sql_answer,
+    save_sql_exec_data,
+    start_log,
+    trigger_log_error,
+)
+from apps.chat.models.chat_model import (
+    AIPromptMessage,
+    AxisObj,
+    Chat,
+    ChatFinishStep,
+    ChatLog,
+    ChatQuestion,
+    ChatRecord,
+    HumanPromptMessage,
+    OperationEnum,
+    RenameChat,
+    SystemPromptMessage,
+)
 from apps.data_training.curd.data_training import get_training_template
 from apps.datasource.crud.datasource import get_table_schema, get_tables_sample_data
 from apps.datasource.crud.permission import get_row_permission_filters, is_normal_user
 from apps.datasource.embedding.ds_embedding import get_ds_embedding
 from apps.datasource.models.datasource import CoreDatasource
-from apps.db.db import exec_sql, get_version, check_connection, get_sqlglot_dialect
+from apps.db.db import check_connection, exec_sql, get_sqlglot_dialect, get_version
 from apps.system.crud.aimodel_manage import get_ai_model_list_by_workspace
-from apps.system.crud.assistant import AssistantOutDs, AssistantOutDsFactory, get_assistant_ds
+from apps.system.crud.assistant import (
+    AssistantOutDs,
+    AssistantOutDsFactory,
+    get_assistant_ds,
+)
 from apps.system.crud.parameter_manage import get_groups
 from apps.system.schemas.system_schema import AssistantOutDsSchema
 from apps.terminology.curd.terminology import get_terminology_template
 from common.core.config import settings
 from common.core.db import engine
 from common.core.deps import CurrentAssistant, CurrentUser
-from common.error import SingleMessageError, SQLBotDBError, ParseSQLResultError, SQLBotDBConnectionError
+from common.error import (
+    ParseSQLResultError,
+    SingleMessageError,
+    SQLBotDBConnectionError,
+    SQLBotDBError,
+)
 from common.utils.data_format import DataFormat
 from common.utils.locale import I18n, I18nHelper
 from common.utils.utils import SQLBotLogUtil, extract_nested_json, prepare_for_orjson
@@ -90,19 +138,19 @@ class LLMService:
     record: ChatRecord
     config: LLMConfig
     llm: BaseChatModel
-    sql_message: List[Union[BaseMessage, dict[str, Any]]]
-    chart_message: List[Union[BaseMessage, dict[str, Any]]]
+    sql_message: list[BaseMessage | dict[str, Any]]
+    chart_message: list[BaseMessage | dict[str, Any]]
 
     # session: Session = db_session
     current_user: CurrentUser
-    current_assistant: Optional[CurrentAssistant] = None
-    out_ds_instance: Optional[AssistantOutDs] = None
+    current_assistant: CurrentAssistant | None = None
+    out_ds_instance: AssistantOutDs | None = None
     change_title: bool = False
 
-    generate_sql_logs: List[ChatLog]
-    generate_chart_logs: List[ChatLog]
+    generate_sql_logs: list[ChatLog]
+    generate_chart_logs: list[ChatLog]
     current_logs: dict[OperationEnum, ChatLog]
-    chunk_list: List[str]
+    chunk_list: list[str]
     future: Future
 
     trans: I18nHelper = None
@@ -114,7 +162,7 @@ class LLMService:
     base_message_round_count_limit: int = settings.GENERATE_SQL_QUERY_HISTORY_ROUND_COUNT
 
     def __init__(self, session: Session, current_user: CurrentUser, chat_question: ChatQuestion,
-                 current_assistant: Optional[CurrentAssistant] = None, no_reasoning: bool = False,
+                 current_assistant: CurrentAssistant | None = None, no_reasoning: bool = False,
                  embedding: bool = False, config: LLMConfig = None):
         self.sql_message = []
         self.chart_message = []
@@ -238,20 +286,20 @@ class LLMService:
                 return True
             else:
                 return False
-        except Exception as e:
+        except Exception:
             return True
 
     def init_messages(self, session: Session):
 
         self.table_name_list = self.choose_table_schema(session)
 
-        last_sql_messages: List[dict[str, Any]] = self.generate_sql_logs[-1].messages if len(
+        last_sql_messages: list[dict[str, Any]] = self.generate_sql_logs[-1].messages if len(
             self.generate_sql_logs) > 0 else []
         if self.chat_question.regenerate_record_id:
             # filter record before regenerate_record_id
             _temp_log = next(
                 filter(lambda obj: obj.pid == self.chat_question.regenerate_record_id, self.generate_sql_logs), None)
-            last_sql_messages: List[dict[str, Any]] = _temp_log.messages if _temp_log else []
+            last_sql_messages: list[dict[str, Any]] = _temp_log.messages if _temp_log else []
 
         # 排除所有的系统提示词
         last_sql_messages = [obj for obj in last_sql_messages if obj.get("sqlbot_system") != True]
@@ -294,13 +342,15 @@ class LLMService:
                     else:
                         _agent = _route.get("agent", {})
                         self.sql_message.append(AIPromptMessage(content=f'我已确认命中「{_agent.get("name", "")}」Agent，加载了其绑定的 Skills、表白名单和隔离规则。我会严格遵守。'))
-        except Exception as e:
+        except Exception:
             pass
 
         # AI2BI: inject user memory as soft context
         try:
+            from sqlmodel import Session as _MemSession
+            from sqlmodel import select as _mem_select
+
             from apps.ai2bi.models import Ai2biMemory
-            from sqlmodel import Session as _MemSession, select as _mem_select
             from common.core.db import engine as _mem_engine
             with _MemSession(_mem_engine) as _mem_s:
                 _memories = _mem_s.exec(
@@ -314,10 +364,10 @@ class LLMService:
                 for _m in _memories:
                     _tag = "📌" if _m.pinned else "•"
                     _mem_lines.append(f"{_tag} [{_m.category or '通用'}] {_m.content}")
-                _mem_prompt = f"<user_memory>\n以下是关于该用户的记忆和偏好，作为软上下文参考（不能覆盖硬规则）：\n" + "\n".join(_mem_lines) + "\n</user_memory>"
+                _mem_prompt = "<user_memory>\n以下是关于该用户的记忆和偏好，作为软上下文参考（不能覆盖硬规则）：\n" + "\n".join(_mem_lines) + "\n</user_memory>"
                 self.sql_message.append(HumanPromptMessage(content=_mem_prompt))
                 self.sql_message.append(AIPromptMessage(content='我已确认用户记忆，会作为偏好参考，不会用记忆覆盖业务硬规则。'))
-        except Exception as e:
+        except Exception:
             pass
 
         if _system_templates.get('terminologies'):
@@ -339,13 +389,13 @@ class LLMService:
                     _msg = AIMessage(content=_msg_dict.get('content'))
                     self.sql_message.append(_msg)
 
-        last_chart_messages: List[dict[str, Any]] = self.generate_chart_logs[-1].messages if len(
+        last_chart_messages: list[dict[str, Any]] = self.generate_chart_logs[-1].messages if len(
             self.generate_chart_logs) > 0 else []
         if self.chat_question.regenerate_record_id:
             # filter record before regenerate_record_id
             _temp_log = next(
                 filter(lambda obj: obj.pid == self.chat_question.regenerate_record_id, self.generate_chart_logs), None)
-            last_chart_messages: List[dict[str, Any]] = _temp_log.messages if _temp_log else []
+            last_chart_messages: list[dict[str, Any]] = _temp_log.messages if _temp_log else []
 
         # 排除所有的系统提示词
         last_chart_messages = [obj for obj in last_chart_messages if obj.get("sqlbot_system") != True]
@@ -491,12 +541,12 @@ class LLMService:
                                                                 full_message=self.chat_question.db_schema)
         return tables
 
-    def generate_analysis(self, _session: Session):
+    def generate_legacy_chart_analysis(self, _session: Session):
         fields = self.get_fields_from_chart(_session)
         self.chat_question.fields = orjson.dumps(fields).decode()
         data = get_chat_chart_data(_session, self.record.id)
         self.chat_question.data = orjson.dumps(data.get('data')).decode()
-        analysis_msg: List[Union[BaseMessage, dict[str, Any]]] = []
+        analysis_msg: list[BaseMessage | dict[str, Any]] = []
 
         ds_id = self.ds.id if isinstance(self.ds, CoreDatasource) else None
 
@@ -555,7 +605,7 @@ class LLMService:
         ds_id = self.ds.id if isinstance(self.ds, CoreDatasource) else None
         self.filter_custom_prompts(_session, CustomPromptTypeEnum.PREDICT_DATA, self.current_user.oid, ds_id)
 
-        predict_msg: List[Union[BaseMessage, dict[str, Any]]] = []
+        predict_msg: list[BaseMessage | dict[str, Any]] = []
         predict_msg.append(SystemPromptMessage(content=self.chat_question.predict_sys_question()))
         predict_msg.append(HumanMessage(content=self.chat_question.predict_user_question()))
 
@@ -615,7 +665,7 @@ class LLMService:
             #         current_user=self.current_user,
             #         ds=self.ds)
 
-        guess_msg: List[Union[BaseMessage, dict[str, Any]]] = []
+        guess_msg: list[BaseMessage | dict[str, Any]] = []
         guess_msg.append(SystemPromptMessage(content=self.chat_question.guess_sys_question(self.articles_number)))
 
         old_questions = list(map(lambda q: q.strip(), get_old_questions(_session, self.record.datasource)))
@@ -667,7 +717,7 @@ class LLMService:
         yield {'recommended_question': self.record.recommended_question}
 
     def select_datasource(self, _session: Session):
-        datasource_msg: List[Union[BaseMessage, dict[str, Any]]] = []
+        datasource_msg: list[BaseMessage | dict[str, Any]] = []
         datasource_msg.append(SystemPromptMessage(self.chat_question.datasource_sys_question()))
         if self.current_assistant and self.current_assistant.type != 4:
             _ds_list = get_assistant_ds(session=_session, llm_service=self)
@@ -858,7 +908,7 @@ class LLMService:
         sub_query = json.dumps(sub_mappings, ensure_ascii=False)
         self.chat_question.sql = sql
         self.chat_question.sub_query = sub_query
-        dynamic_sql_msg: List[Union[BaseMessage, dict[str, Any]]] = []
+        dynamic_sql_msg: list[BaseMessage | dict[str, Any]] = []
         dynamic_sql_msg.append(SystemPromptMessage(content=self.chat_question.dynamic_sys_question()))
         dynamic_sql_msg.append(HumanMessage(content=self.chat_question.dynamic_user_question()))
 
@@ -903,7 +953,7 @@ class LLMService:
         SQLBotLogUtil.info(full_dynamic_text)
         return full_dynamic_text
 
-    def generate_assistant_dynamic_sql(self, _session: Session, sql, tables: List):
+    def generate_assistant_dynamic_sql(self, _session: Session, sql, tables: list):
         ds: AssistantOutDsSchema = self.ds
         sub_query = []
         result_dict = {}
@@ -922,7 +972,7 @@ class LLMService:
         filter = json.dumps(filters, ensure_ascii=False)
         self.chat_question.sql = sql
         self.chat_question.filter = filter
-        permission_sql_msg: List[Union[BaseMessage, dict[str, Any]]] = []
+        permission_sql_msg: list[BaseMessage | dict[str, Any]] = []
         permission_sql_msg.append(SystemPromptMessage(content=self.chat_question.filter_sys_question()))
         permission_sql_msg.append(HumanMessage(content=self.chat_question.filter_user_question()))
 
@@ -967,14 +1017,14 @@ class LLMService:
         SQLBotLogUtil.info(full_filter_text)
         return full_filter_text
 
-    def generate_filter(self, _session: Session, sql: str, tables: List):
+    def generate_filter(self, _session: Session, sql: str, tables: list):
         filters = get_row_permission_filters(session=_session, current_user=self.current_user, ds=self.ds,
                                              tables=tables)
         if not filters:
             return None
         return self.build_table_filter(session=_session, sql=sql, filters=filters)
 
-    def generate_assistant_filter(self, _session: Session, sql, tables: List):
+    def generate_assistant_filter(self, _session: Session, sql, tables: list):
         ds: AssistantOutDsSchema = self.ds
         filters = []
         for table in ds.tables:
@@ -984,7 +1034,7 @@ class LLMService:
             return None
         return self.build_table_filter(session=_session, sql=sql, filters=filters)
 
-    def generate_chart(self, _session: Session, chart_type: Optional[str] = '', schema: Optional[str] = ''):
+    def generate_chart(self, _session: Session, chart_type: str | None = '', schema: str | None = ''):
         # append current question
         self.chart_message.append(HumanMessage(self.chat_question.chart_user_question(chart_type, schema)))
 
@@ -1026,7 +1076,7 @@ class LLMService:
                                                                   reasoning_content=full_thinking_text,
                                                                   token_usage=token_usage)
 
-    def check_sql(self, session: Session, res: str, operate: OperationEnum) -> tuple[str, Optional[list]]:
+    def check_sql(self, session: Session, res: str, operate: OperationEnum) -> tuple[str, list | None]:
         json_str = extract_nested_json(res)
 
         log = self.current_logs[operate]
@@ -1059,12 +1109,12 @@ class LLMService:
         return sql, data.get('tables')
 
     @staticmethod
-    def get_chart_type_from_sql_answer(res: str) -> Optional[str]:
+    def get_chart_type_from_sql_answer(res: str) -> str | None:
         json_str = extract_nested_json(res)
         if json_str is None:
             return None
 
-        chart_type: Optional[str]
+        chart_type: str | None
         data: dict
         try:
             data = orjson.loads(json_str)
@@ -1079,12 +1129,12 @@ class LLMService:
         return chart_type
 
     @staticmethod
-    def get_brief_from_sql_answer(res: str) -> Optional[str]:
+    def get_brief_from_sql_answer(res: str) -> str | None:
         json_str = extract_nested_json(res)
         if json_str is None:
             return None
 
-        brief: Optional[str]
+        brief: str | None
         data: dict
         try:
             data = orjson.loads(json_str)
@@ -1106,7 +1156,7 @@ class LLMService:
 
         return sql
 
-    def check_save_chart(self, session: Session, res: str) -> Dict[str, Any]:
+    def check_save_chart(self, session: Session, res: str) -> dict[str, Any]:
 
         json_str = extract_nested_json(res)
         if json_str is None:
@@ -1114,7 +1164,7 @@ class LLMService:
                                                    'traceback': "Cannot parse chart config from answer:\n" + res}).decode())
         data: dict
 
-        chart: Dict[str, Any] = {}
+        chart: dict[str, Any] = {}
         message = ''
         error = False
 
@@ -1184,7 +1234,7 @@ class LLMService:
     def save_error(self, session: Session, message: str):
         return save_error_message(session=session, record_id=self.record.id, message=message)
 
-    def save_sql_data(self, session: Session, data_obj: Dict[str, Any]):
+    def save_sql_data(self, session: Session, data_obj: dict[str, Any]):
         try:
             data_result = data_obj.get('data')
             limit = 1000
@@ -1224,92 +1274,249 @@ class LLMService:
                 err = traceback.format_exc(limit=1, chain=True)
                 raise SQLBotDBError(err)
 
-    def generate_analysis(self, session: Session, sql: str, result: dict, route_info: dict):
+    def generate_evidence_analysis(self, session: Session, context: 'AnalysisContext') -> 'AnalysisResult':  # noqa: F821
         """
-        AI2BI: 独立分析阶段 — 基于 SQL 执行结果（Evidence Pack）生成业务分析。
+        AI2BI Phase 0：统一证据分析入口。
 
-        这是 SQL 生成和图表渲染之后的独立 LLM 调用：
-        - 输入：Evidence Pack（SQL 结果 + 指标口径 + 路由信息）
-        - 输出：带证据标注的分析文本（[SQL] / [计算] / [模型推导]）
-        - 约束：分析 LLM 只能引用 Evidence Pack 中的数据，禁止编造
+        流程：SQL 结果 -> 确定性分析引擎 -> Facts -> Evidence Pack -> 分析 LLM -> QA -> 持久化。
+
+        - 只接收 AnalysisContext（含已执行 SQL、标准化结果、稳定路由、指标上下文）。
+        - 分析不依赖图表是否成功。
+        - blocked QA 下不保存/不回传 LLM 正文；SQL 结果与图表仍保留。
+        - 返回 AnalysisResult，由 run_task 负责 SSE 事件。
         """
-        import yaml as _yaml
-        from apps.ai2bi.evidence_builder import build_evidence_pack, evidence_pack_to_prompt
+        import time
 
-        # 构建 Evidence Pack
-        pack = build_evidence_pack(sql, result, route_info)
-        evidence_prompt = evidence_pack_to_prompt(pack)
+        from apps.ai2bi.analysis_contract import AnalysisResult, AnalysisStatus
+        from apps.ai2bi.analysis_engine import analyze_result
+        from apps.ai2bi.evidence_builder import (
+            build_evidence_pack,
+            evidence_pack_to_prompt,
+        )
+        from apps.ai2bi.qa_checker import run_full_qa
 
-        # 加载分析模板
-        template_path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "analysis_template.yaml")
+        started = time.time()
+
+        # 1. 确定性分析
         try:
-            with open(template_path, "r", encoding="utf-8") as f:
-                _tpl = _yaml.safe_load(f)
-        except Exception:
-            _tpl = {"analysis_system": "你是数据分析助手。基于查询结果做分析。", "analysis_user": "问题: {question}"}
+            facts = analyze_result(context.result, context.metric_context)
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI determin engine failed: {e}")
+            facts = []
 
-        system_prompt = _tpl.get("analysis_system", "").replace("{evidence_pack}", evidence_prompt)
-        user_prompt = _tpl.get("analysis_user", "").replace("{question}", self.chat_question.question)
+        # 2. 构建 Evidence Pack（含 facts）
+        pack = build_evidence_pack(
+            context.sql, context.result, context.route_info,
+            metric_context=context.metric_context, facts=facts,
+        )
+        evidence_prompt = evidence_pack_to_prompt(pack)
+        pack['result_hash'] = self._result_hash(context.result)
 
-        # 构建分析消息
-        from langchain_core.messages import SystemMessage, HumanMessage as LC_HumanMessage
+        # 3. 结果级 QA：空结果/数据不足，直接返回 data_insufficient，不调用 LLM
+        result_qa = run_full_qa(context.sql, context.result, "", pack, facts, context.qa_config)
+        if not context.result.get("data"):
+            result = AnalysisResult(
+                status=AnalysisStatus.DATA_INSUFFICIENT,
+                facts=facts,
+                qa=result_qa,
+                reason="SQL 未返回数据，无法分析。",
+            )
+            self._save_phase0_evidence(session, context, result, pack)
+            return result
+
+        # 4. 加载分析模板
+        analysis_system, analysis_user = self._load_analysis_template(evidence_prompt, context.question)
+
+        # 5. 调用分析 LLM
+        from langchain_core.messages import HumanMessage as LC_HumanMessage
+        from langchain_core.messages import SystemMessage
         analysis_msg = [
-            SystemMessage(content=system_prompt),
-            LC_HumanMessage(content=user_prompt),
+            SystemMessage(content=analysis_system),
+            LC_HumanMessage(content=analysis_user),
         ]
-
         token_usage = {}
         full_analysis_text = ''
-        res = process_stream(self.llm.stream(analysis_msg), token_usage)
-        for chunk in res:
-            if chunk.get('content'):
-                full_analysis_text += chunk.get('content')
-                yield chunk
-            if chunk.get('reasoning_content'):
-                yield chunk
-
-        # 质检
-        qa_result = None
         try:
-            from apps.ai2bi.qa_checker import run_full_qa
-            qa_result = run_full_qa(sql, result, full_analysis_text, pack)
-            SQLBotLogUtil.info(f"AI2BI QA: passed={qa_result['passed']}, violations={qa_result.get('answer_violations', [])}")
+            res = process_stream(self.llm.stream(analysis_msg), token_usage)
+            for chunk in res:
+                if chunk.get('content'):
+                    full_analysis_text += chunk.get('content')
         except Exception as e:
-            SQLBotLogUtil.info(f"AI2BI QA failed: {e}")
+            SQLBotLogUtil.info(f"AI2BI analysis LLM failed: {e}")
+            result = AnalysisResult(
+                status=AnalysisStatus.FAILED,
+                facts=facts,
+                error=str(e),
+                qa=result_qa,
+            )
+            self._save_phase0_evidence(session, context, result, pack)
+            return result
 
-        # 保存分析记录
-        try:
-            self.record = save_sql_answer(session=session, record_id=self.record.id,
-                                          answer=orjson.dumps({'content': full_analysis_text, 'type': 'analysis'}).decode())
-        except Exception:
-            pass
+        # 6. QA（含答案级）
+        qa = run_full_qa(context.sql, context.result, full_analysis_text, pack, facts, context.qa_config)
 
-        # 保存证据记录（含质检结果）
+        # 7. 依据 QA 决定状态
+        if qa.status == "blocked":
+            result = AnalysisResult(
+                status=AnalysisStatus.BLOCKED,
+                facts=facts,
+                qa=qa,
+                reason="分析因质检不通过被阻断",
+            )
+            self._save_phase0_evidence(session, context, result, pack)
+            return result
+
+        result = AnalysisResult(
+            status=AnalysisStatus.COMPLETED,
+            facts=facts,
+            final_text=full_analysis_text,
+            qa=qa,
+            reason="warning" if qa.status == "warning" else None,
+            metadata={
+                'model_name': getattr(self.config, 'model_name', None),
+                'total_tokens': token_usage.get('total_tokens', 0),
+                'duration_ms': int((time.time() - started) * 1000),
+            },
+        )
+
+        # 8. 持久化分析正文（仅通过 QA 时）
+        if full_analysis_text:
+            try:
+                self.record = save_analysis_answer(
+                    session=session, record_id=self.record.id,
+                    answer=orjson.dumps({'content': full_analysis_text}).decode(),
+                )
+            except Exception as e:
+                SQLBotLogUtil.info(f"AI2BI save analysis answer failed: {e}")
+
+        self._save_phase0_evidence(session, context, result, pack)
+        return result
+
+    def _save_phase0_evidence(self, session, context, result, pack):
+        """持久化证据记录（含 Facts、QA、状态、分析文本）。"""
         try:
             from apps.ai2bi.evidence_builder import save_evidence_record
+            qa = result.qa
             save_evidence_record(
                 session=session,
                 record_id=self.record.id,
                 chat_id=self.record.chat_id,
-                route_info=route_info,
-                sql=sql,
-                result=result,
-                qa_passed=qa_result["passed"] if qa_result else None,
-                qa_violations=qa_result.get("answer_violations", []) if qa_result else None,
+                source_record_id=context.source_record_id or context.record_id,
+                route_info=context.route_info,
+                sql=context.sql,
+                result=context.result,
+                metric_context=context.metric_context,
+                facts=result.facts,
+                qa_result=qa.model_dump(mode="json") if qa else None,
+                analysis_status=result.status.value,
+                analysis_error=result.error,
+                analysis_output=result.final_text,
+                result_hash=pack.get('result_hash'),
+                agent_snapshot=context.route_info.get('agent') if isinstance(context.route_info, dict) else None,
+                model_name=result.metadata.get('model_name'),
+                total_tokens=result.metadata.get('total_tokens'),
+                duration_ms=result.metadata.get('duration_ms'),
+                qa_passed=(qa.status == "passed") if qa else None,
+                qa_violations=([f.message for f in qa.findings if f.severity == 'block'] if qa else None),
             )
         except Exception as e:
-            SQLBotLogUtil.info(f"AI2BI Evidence save failed: {e}")
+            SQLBotLogUtil.info(f"AI2BI evidence save failed: {e}")
 
-        # 返回质检摘要（供 run_task 发送到前端）
-        if qa_result:
-            import orjson as _orjson
-            yield {'qa_summary': _orjson.dumps(qa_result).decode()}
+    def _load_analysis_template(self, evidence_prompt: str, question: str):
+        """加载分析模板；缺失时使用含 evidence_pack 的兜底模板。"""
+        import yaml as _yaml
+        template_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "templates", "analysis_template.yaml")
+        try:
+            with open(template_path, encoding="utf-8") as f:
+                _tpl = _yaml.safe_load(f)
+        except Exception:
+            _tpl = {
+                "analysis_system": "你是数据分析助手。\n<evidence_pack>\n{evidence_pack}\n</evidence_pack>\n只引用证据包中的数字并标注来源。",
+                "analysis_user": "问题: {question}",
+            }
+        system = _tpl.get("analysis_system", "").replace("{evidence_pack}", evidence_prompt or "")
+        user = _tpl.get("analysis_user", "").replace("{question}", question or "")
+        return system, user
+
+    def _result_hash(self, result: dict) -> str:
+        """对结果集计算稳定 hash。"""
+        import hashlib
+        return hashlib.sha256(orjson.dumps(result, default=str).decode("utf-8", "ignore").encode("utf-8")).hexdigest()[:32]
+
+    def _load_metric_context(self, route_info: dict) -> list:
+        """从路由命中的 Agent 读取指标定义快照；无匹配时返回空列表。"""
+        try:
+            from sqlmodel import select
+
+            from apps.ai2bi.agent_models import Ai2biAgent
+            from apps.ai2bi.asset_models import Ai2biMetricDict
+            from common.core.db import engine
+
+            agent = route_info.get('agent') or {}
+            agent_id = agent.get('id')
+            if not agent_id:
+                return []
+
+            with Session(engine) as s:
+                ag = s.get(Ai2biAgent, agent_id)
+                if not ag:
+                    return []
+                metric_ids = ag.metric_ids or []
+                metrics = []
+                if metric_ids:
+                    metrics = s.exec(select(Ai2biMetricDict).where(Ai2biMetricDict.id.in_(metric_ids))).all()
+                else:
+                    metrics = s.exec(
+                        select(Ai2biMetricDict).where(
+                            Ai2biMetricDict.domain_code == ag.vertical,
+                            Ai2biMetricDict.status.in_("confirmed", "candidate"),
+                        )
+                    ).all()
+                return [
+                    {
+                        "id": m.id, "cn_name": m.cn_name, "business_definition": m.business_definition,
+                        "calculation": m.calculation, "unit": m.unit, "grain": m.grain,
+                    }
+                    for m in metrics
+                ]
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI load metric context failed: {e}")
+            return []
+
+    def _load_qa_config(self, route_info: dict) -> dict:
+        """读取命中的 Agent 的质检配置；无则返回默认配置。"""
+        default = {
+            "check_evidence": True,
+            "check_numeric_consistency": True,
+            "block_unsourced_numbers": True,
+        }
+        try:
+            from apps.ai2bi.agent_models import Ai2biAgent
+            from common.core.db import engine
+            agent = route_info.get('agent') or {}
+            agent_id = agent.get('id')
+            if not agent_id:
+                return default
+            with Session(engine) as s:
+                ag = s.get(Ai2biAgent, agent_id)
+                if ag and ag.qa_config:
+                    import json as _json
+                    try:
+                        cfg = _json.loads(ag.qa_config)
+                        if isinstance(cfg, dict):
+                            return {**default, **cfg}
+                    except Exception:
+                        pass
+            return default
+        except Exception as e:
+            SQLBotLogUtil.info(f"AI2BI load qa config failed: {e}")
+            return default
 
     def pop_chunk(self):
         try:
             chunk = self.chunk_list.pop(0)
             return chunk
-        except IndexError as e:
+        except IndexError:
             return None
 
     def await_result(self):
@@ -1339,7 +1546,7 @@ class LLMService:
 
     def run_task(self, in_chat: bool = True, stream: bool = True,
                  finish_step: ChatFinishStep = ChatFinishStep.GENERATE_CHART, return_img: bool = True):
-        json_result: Dict[str, Any] = {'success': True}
+        json_result: dict[str, Any] = {'success': True}
         _session = None
         try:
             _session = session_maker()
@@ -1642,30 +1849,75 @@ class LLMService:
                         markdown_table = df_safe.to_markdown(index=False)
                         yield markdown_table + '\n\n'
 
-            # AI2BI: 独立分析阶段 — 基于 SQL 结果生成带证据标注的业务分析
+            # AI2BI: Phase 0 统一证据分析 — 基于 SQL 结果执行确定性分析 + LLM 解释
             try:
+                from apps.ai2bi.analysis_contract import AnalysisContext
                 from apps.ai2bi.skill_router import route_question
+
+                # 解析一次路由/Skill 上下文，贯穿 SQL、Evidence、Facts、QA、持久化
                 _analysis_route = route_question(self.chat_question.question)
-                _analysis_res = self.generate_analysis(_session, real_execute_sql, result, _analysis_route)
+
+                _analysis_context = AnalysisContext(
+                    record_id=self.record.id,
+                    chat_id=self.record.chat_id,
+                    source_record_id=self.get_record().regenerate_record_id or self.record.id,
+                    question=self.chat_question.question,
+                    datasource_id=self.ds.id if isinstance(self.ds, CoreDatasource) else None,
+                    datasource_name=getattr(self.ds, 'name', None),
+                    sql=real_execute_sql,
+                    result=result,
+                    route_info=_analysis_route,
+                    metric_context=self._load_metric_context(_analysis_route),
+                    qa_config=self._load_qa_config(_analysis_route),
+                    agent_code=(_analysis_route.get('agent') or {}).get('code'),
+                    agent_name=(_analysis_route.get('agent') or {}).get('name'),
+                )
+
                 if in_chat:
                     yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_start'}).decode() + '\n\n'
-                    for chunk in _analysis_res:
-                        if chunk.get('content'):
-                            yield 'data:' + orjson.dumps(
-                                {'content': chunk.get('content'), 'type': 'analysis'}).decode() + '\n\n'
-                        if chunk.get('qa_summary'):
-                            yield 'data:' + orjson.dumps(
-                                {'content': chunk.get('qa_summary'), 'type': 'evidence_qa'}).decode() + '\n\n'
+                    yield 'data:' + orjson.dumps({
+                        'type': 'analysis_status',
+                        'status': 'started',
+                        'message': '开始分析',
+                    }).decode() + '\n\n'
+
+                _analysis_result = self.generate_evidence_analysis(_session, _analysis_context)
+
+                # SSE 事件：基于 AnalysisResult 输出
+                if in_chat:
+                    yield 'data:' + orjson.dumps({
+                        'type': 'analysis_status',
+                        'status': _analysis_result.status.value,
+                        'message': _analysis_result.reason or _analysis_result.error or '',
+                    }).decode() + '\n\n'
+
+                    if _analysis_result.qa is not None:
+                        yield 'data:' + orjson.dumps({
+                            'content': orjson.dumps(_analysis_result.qa.model_dump(mode="json")).decode(),
+                            'type': 'evidence_qa',
+                        }).decode() + '\n\n'
+
+                    if _analysis_result.final_text:
+                        yield 'data:' + orjson.dumps({
+                            'content': _analysis_result.final_text,
+                            'type': 'analysis',
+                        }).decode() + '\n\n'
+
+                    yield 'data:' + orjson.dumps({
+                        'type': 'evidence_ready',
+                        'record_id': self.record.id,
+                        'status': _analysis_result.status.value,
+                    }).decode() + '\n\n'
                     yield 'data:' + orjson.dumps({'type': 'info', 'msg': 'analysis_done'}).decode() + '\n\n'
                 else:
-                    if stream:
-                        for chunk in _analysis_res:
-                            if chunk.get('content'):
-                                yield chunk.get('content')
-                        yield '\n\n'
+                    if stream and _analysis_result.final_text:
+                        yield _analysis_result.final_text + '\n\n'
             except Exception as _analysis_err:
                 SQLBotLogUtil.info(f"AI2BI Analysis skipped: {_analysis_err}")
                 if in_chat:
+                    yield 'data:' + orjson.dumps(
+                        {'type': 'analysis_error', 'code': 'analysis_failed',
+                         'message': str(_analysis_err), 'retryable': False}).decode() + '\n\n'
                     yield 'data:' + orjson.dumps(
                         {'type': 'info', 'msg': 'analysis_skipped', 'content': str(_analysis_err)}).decode() + '\n\n'
 
@@ -1737,7 +1989,7 @@ class LLMService:
                 yield 'data:' + orjson.dumps({'content': error_msg, 'type': 'error'}).decode() + '\n\n'
             else:
                 if stream:
-                    yield f'&#x274c; **ERROR:**\n'
+                    yield '&#x274c; **ERROR:**\n'
                     yield f'> {error_msg}\n'
                 else:
                     json_result['success'] = False
@@ -1783,7 +2035,7 @@ class LLMService:
             self.chunk_list.append(chunk)
 
     def run_analysis_or_predict_task(self, action_type: str, in_chat: bool = True, stream: bool = True):
-        json_result: Dict[str, Any] = {'success': True}
+        json_result: dict[str, Any] = {'success': True}
         _session = None
         try:
             _session = session_maker()
@@ -1797,8 +2049,8 @@ class LLMService:
                 json_result['record_id'] = self.get_record().id
 
             if action_type == 'analysis':
-                # generate analysis
-                analysis_res = self.generate_analysis(_session)
+                # generate analysis（旧版图表分析路径，兼容手动"数据分析"入口）
+                analysis_res = self.generate_legacy_chart_analysis(_session)
                 full_text = ''
                 for chunk in analysis_res:
                     full_text += chunk.get('content')
@@ -1907,7 +2159,7 @@ class LLMService:
                 yield 'data:' + orjson.dumps({'content': error_msg, 'type': 'error'}).decode() + '\n\n'
             else:
                 if stream:
-                    yield f'&#x274c; **ERROR:**\n'
+                    yield '&#x274c; **ERROR:**\n'
                     yield f'> {error_msg}\n'
                 else:
                     json_result['success'] = False
@@ -1924,7 +2176,7 @@ class LLMService:
                 current_ds = session.get(CoreDatasource, _ds.id)
                 if not current_ds:
                     raise SingleMessageError('chat.ds_is_invalid')
-            except Exception as e:
+            except Exception:
                 raise SingleMessageError("chat.ds_is_invalid")
         else:
             try:
@@ -1932,7 +2184,7 @@ class LLMService:
                 match_ds = any(item.get("id") == _ds.id for item in _ds_list)
                 if not match_ds:
                     type = self.current_assistant.type
-                    msg = f"[please check ds list and public ds list]" if type == 0 else f"[please check ds api]"
+                    msg = "[please check ds list and public ds list]" if type == 0 else "[please check ds api]"
                     raise SingleMessageError(msg)
             except Exception as e:
                 raise SingleMessageError(f"ds is invalid [{str(e)}]")
@@ -2040,7 +2292,7 @@ def get_token_usage(chunk: BaseMessageChunk, token_usage: dict = None):
 
 
 def process_stream(res: Iterator[BaseMessageChunk],
-                   token_usage: Dict[str, Any] = None,
+                   token_usage: dict[str, Any] = None,
                    enable_tag_parsing: bool = settings.PARSE_REASONING_BLOCK_ENABLED,
                    start_tag: str = settings.DEFAULT_REASONING_CONTENT_START,
                    end_tag: str = settings.DEFAULT_REASONING_CONTENT_END

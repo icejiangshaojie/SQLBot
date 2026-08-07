@@ -1,0 +1,33 @@
+{
+  "test_key": "corp_deposit.monthly_average_balance",
+  "version": "0.1.0",
+  "status": "draft",
+  "domain_ref": "corp_deposit",
+  "agent_ref": "corp_deposit_agent",
+  "question": "2026年7月对公日均存款余额是多少，并说明趋势。",
+  "analysis_mode": "careful",
+  "expected_contract": {
+    "metric_refs": ["corp_deposit.average_daily_balance"],
+    "time_range": {"start": "2026-07-01", "end": "2026-07-31"},
+    "requires_clarification": false
+  },
+  "expected_route": {
+    "agent_ref": "corp_deposit_agent",
+    "skill_ref": "corp_deposit_balance_overview"
+  },
+  "expected_sql": {
+    "allowed_tables": ["corp_deposit.dws_customer_daily_balance"],
+    "required_filters": ["customer_status = 'ACTIVE'"],
+    "required_partition": true,
+    "readonly": true
+  },
+  "expected_analysis": {
+    "operators": ["summary", "trend"],
+    "requires_supplementary_query": true,
+    "forbidden_claims": ["因果归因", "数值预测"],
+    "all_numbers_must_be_sourced": true
+  },
+  "fixtures": {
+    "result_ref": "fixtures/corp_deposit/monthly_average_balance_202607.json"
+  }
+}

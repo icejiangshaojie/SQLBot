@@ -45,7 +45,8 @@ export class ChatRecord {
   chart?: string
   analysis?: string
   analysis_thinking?: string
-  evidence_qa?: any  // AI2BI: 质检结果 {passed, violations, evidence_summary}
+  analysis_status?: string
+  evidence_qa?: any  // AI2BI: 质检结果 {status, findings, summary}
   knowledge_answer?: string  // AI2BI: 知识问答模式回答（不生成 SQL）
   predict?: string
   predict_content?: string
@@ -261,7 +262,7 @@ const toChatRecord = (data?: any): ChatRecord | undefined => {
   if (!data) {
     return undefined
   }
-  return new ChatRecord(
+  const record = new ChatRecord(
     data.id,
     data.chat_id,
     data.create_time,
@@ -289,6 +290,14 @@ const toChatRecord = (data?: any): ChatRecord | undefined => {
     data.duration,
     data.total_tokens
   )
+  // AI2BI Phase 0：水合历史记录的 QA 与知识回答（原有构造器遗漏）
+  if (data.evidence_qa !== undefined) {
+    record.evidence_qa = data.evidence_qa
+  }
+  if (data.knowledge_answer !== undefined) {
+    record.knowledge_answer = data.knowledge_answer
+  }
+  return record
 }
 const toChatRecordList = (list: any = []): ChatRecord[] => {
   const records: Array<ChatRecord> = []

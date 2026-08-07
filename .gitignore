@@ -196,3 +196,9 @@ sqlbot-xpack
 # Build artifacts
 frontend_dist/
 seed_test_data.py
+
+# Local runtime / debug artifacts (do not commit)
+*.bak_*/
+token.txt
+login_resp.json
+chat_resp.json

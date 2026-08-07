@@ -1,0 +1,45 @@
+template_key: corp_deposit.monthly_average_balance
+name: 对公月度日均存款余额
+version: 0.1.0
+status: draft
+domain_ref: corp_deposit
+workspace_ref: workspace.default
+owner: data.owner@example.com
+
+datasource_ref: datasource.odps_primary
+dialect: odps
+scenario: 查询指定期间的对公日均存款余额
+metric_refs:
+  - corp_deposit.average_daily_balance
+table_refs:
+  - corp_deposit.dws_customer_daily_balance
+field_refs:
+  - corp_deposit.dws_customer_daily_balance.daily_balance
+  - corp_deposit.dws_customer_daily_balance.balance_date
+rule_refs:
+  - corp_deposit.valid_customer
+
+parameters:
+  - name: start_date
+    type: date
+    required: true
+  - name: end_date
+    type: date
+    required: true
+  - name: customer_segment
+    type: string
+    required: false
+
+sql: |
+  SELECT
+    AVG(daily_balance) AS average_daily_balance
+  FROM dws_customer_daily_balance
+  WHERE balance_date BETWEEN '${start_date}' AND '${end_date}'
+    AND customer_status = 'ACTIVE'
+    AND ('${customer_segment}' = '' OR customer_segment = '${customer_segment}')
+
+required_filters:
+  - customer_status = 'ACTIVE'
+test_refs:
+  - test.corp_deposit.monthly_average_balance
+change_reason: 初始模板，待在目标数据源验证

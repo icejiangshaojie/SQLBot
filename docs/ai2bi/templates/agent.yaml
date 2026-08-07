@@ -1,0 +1,56 @@
+agent_code: corp_deposit_agent
+name: 对公存款分析 Agent
+version: 0.1.0
+status: draft
+domain_ref: corp_deposit
+workspace_ref: workspace.default
+business_line: 对公
+owner: business.owner@example.com
+
+capabilities:
+  - knowledge_qa
+  - data_query
+  - data_analysis
+entry_signals:
+  - 对公存款
+  - 公司存款
+  - 企业存款
+  - 存款余额
+negative_signals:
+  - 零售存款
+  - 理财
+
+skill_refs:
+  - skill.corp_deposit.balance_overview
+metric_refs:
+  - corp_deposit.average_daily_balance
+rule_refs:
+  - corp_deposit.valid_customer
+
+table_policy:
+  exclusive_tables:
+    - corp_deposit.dws_customer_daily_balance
+  shared_tables: []
+  cross_domain_allowed: false
+
+analysis_templates:
+  - summary
+  - trend
+  - ranking
+  - structure_split
+  - anomaly
+limits:
+  max_queries: 3
+  max_rows_per_query: 1000
+  timeout_seconds: 60
+qa_config:
+  block_unsourced_numbers: true
+  block_prediction: true
+  block_unsupported_causality: true
+  require_mandatory_filters: true
+
+test_refs:
+  - test.corp_deposit.routing
+  - test.corp_deposit.sql
+  - test.corp_deposit.evidence
+change_reason: 初始 Agent 草稿

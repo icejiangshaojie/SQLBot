@@ -1,0 +1,24 @@
+rule_key: corp_deposit.valid_customer
+name: 有效对公客户过滤
+version: 0.1.0
+status: draft
+domain_ref: corp_deposit
+workspace_ref: workspace.default
+owner: business.owner@example.com
+rule_type: mandatory_filter
+severity: block
+
+applies_to:
+  metrics:
+    - corp_deposit.average_daily_balance
+  tables:
+    - corp_deposit.dws_customer_daily_balance
+content: 对公存款分析仅统计状态为有效的对公客户。
+implementation_hint: customer_status = 'ACTIVE'
+positive_examples:
+  - SELECT ... WHERE customer_status = 'ACTIVE'
+counter_examples:
+  - SELECT ... 未过滤客户状态
+valid_from: '2026-01-01'
+valid_to: null
+change_reason: 初始录入强制过滤

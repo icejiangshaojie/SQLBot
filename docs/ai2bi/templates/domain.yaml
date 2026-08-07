@@ -1,0 +1,34 @@
+code: corp_deposit
+name: 对公存款
+version: 0.1.0
+status: draft
+workspace_ref: workspace.default
+business_line: 对公
+owner: business.owner@example.com
+data_owner: data.owner@example.com
+
+in_scope:
+  - 对公客户存款余额
+  - 对公客户日均存款余额
+  - 期限和客户结构分析
+out_of_scope:
+  - 零售存款
+  - 理财产品
+  - 贷款余额
+
+aliases:
+  - 公司存款
+  - 企业存款
+adjacent_domains:
+  - corp_fx
+  - corp_loan
+
+capabilities:
+  - knowledge_qa
+  - data_query
+  - data_analysis
+
+source:
+  kind: file
+  uri: domain/corp_deposit/domain.yaml
+change_reason: 初始创建业务域

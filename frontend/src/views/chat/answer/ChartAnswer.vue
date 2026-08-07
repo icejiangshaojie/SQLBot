@@ -3,14 +3,12 @@ import BaseAnswer from './BaseAnswer.vue'
 import { Chat, chatApi, ChatInfo, type ChatMessage, ChatRecord, questionApi } from '@/api/chat.ts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ChartBlock from '@/views/chat/chat-block/ChartBlock.vue'
-import JSONBig from 'json-bigint'
-import md from '@/utils/markdown'
-
-// AI2BI: 分析结果 Markdown 渲染
-const renderMarkdown = (text: string) => {
-  if (!text) return ''
-  return md.render(text)
-}
+import { createSseDecoder } from '@/utils/sse'
+import type { QaResult } from '@/types/analysis'
+import AnalysisRunPanel from '@/views/chat/analysis/AnalysisRunPanel.vue'
+import EvidenceDrawer from '@/views/chat/analysis/EvidenceDrawer.vue'
+import MdComponent from '@/views/chat/component/MdComponent.vue'
+import { ai2biApi } from '@/api/ai2bi'
 
 const props = withDefaults(
   defineProps<{
@@ -91,6 +89,12 @@ const _loading = computed({
 
 const stopFlag = ref(false)
 
+// AI2BI Phase 0: 分析运行状态
+const analysisStatus = ref('')
+const analysisMessage = ref('')
+const analysisQa = ref<QaResult | null>(null)
+const evidenceDrawerVisible = ref(false)
+
 const sendMessage = async () => {
   stopFlag.value = false
   _loading.value = true
@@ -116,12 +120,11 @@ const sendMessage = async () => {
     }
     const response = await questionApi.add(param, controller)
     const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
+    const textDecoder = new TextDecoder('utf-8')
+    const sseDecoder = createSseDecoder()
 
     let sql_answer = ''
     let chart_answer = ''
-
-    let tempResult = ''
 
     while (true) {
       if (stopFlag.value) {
@@ -135,37 +138,20 @@ const sendMessage = async () => {
         break
       }
 
-      let chunk = decoder.decode(value, { stream: true })
-      tempResult += chunk
-      const split = tempResult.match(/data:.*}\n\n/g)
-      if (split) {
-        chunk = split.join('')
-        tempResult = tempResult.replace(chunk, '')
-      } else {
-        continue
-      }
-      if (chunk && chunk.startsWith('data:{')) {
-        if (split) {
-          for (const str of split) {
-            let data
-            try {
-              data = JSONBig.parse(str.replace('data:{', '{'))
-            } catch (err) {
-              console.error('JSON string:', str)
-              throw err
-            }
+      const chunk = textDecoder.decode(value, { stream: true })
+      const events = sseDecoder.push(chunk)
+      for (const data of events) {
+        if (data.code && data.code !== 200) {
+          ElMessage({
+            message: data.msg,
+            type: 'error',
+            showClose: true,
+          })
+          _loading.value = false
+          return
+        }
 
-            if (data.code && data.code !== 200) {
-              ElMessage({
-                message: data.msg,
-                type: 'error',
-                showClose: true,
-              })
-              _loading.value = false
-              return
-            }
-
-            switch (data.type) {
+        switch (data.type) {
               case 'id':
                 currentRecord.id = data.id
                 _currentChat.value.records[index.value].id = data.id
@@ -221,8 +207,12 @@ const sendMessage = async () => {
               case 'evidence_qa':
                 // AI2BI: 质检结果
                 try {
-                  _currentChat.value.records[index.value].evidence_qa = JSON.parse(data.content)
-                } catch { _currentChat.value.records[index.value].evidence_qa = data.content }
+                  const parsed = JSON.parse(data.content)
+                  _currentChat.value.records[index.value].evidence_qa = parsed
+                  analysisQa.value = parsed as QaResult
+                } catch {
+                  _currentChat.value.records[index.value].evidence_qa = data.content
+                }
                 break
               case 'knowledge_qa':
                 // AI2BI: 知识问答模式（不生成 SQL，直接回答）
@@ -239,11 +229,23 @@ const sendMessage = async () => {
               case 'finish':
                 emits('finish', currentRecord.id)
                 break
+              case 'analysis_status':
+                analysisStatus.value = data.status || ''
+                analysisMessage.value = data.message || ''
+                if (data.status) {
+                  currentRecord.analysis_status = data.status
+                }
+                break
+              case 'evidence_ready':
+                analysisStatus.value = data.status || analysisStatus.value
+                break
+              case 'analysis_error':
+                analysisMessage.value = data.message || analysisMessage.value
+                analysisStatus.value = 'failed'
+                break
             }
             await nextTick()
           }
-        }
-      }
     }
   } catch (error) {
     if (!currentRecord.error) {
@@ -292,9 +294,32 @@ onBeforeUnmount(() => {
   stop()
 })
 
+function restoreAnalysisState() {
+  // 历史刷新时，ChatRecord 不持久化 evidence_qa/analysis_status，
+  // 从 Evidence 接口懒加载补全状态与 QA。
+  const rec = props.message?.record
+  if (!rec?.id || !rec.analysis || rec.evidence_qa) return
+  ai2biApi
+    .getEvidence(rec.id)
+    .then((res: any) => {
+      const d = res?.data ?? res
+      if (!d?.found) return
+      if (d.analysis_status) {
+        analysisStatus.value = d.analysis_status
+        rec.analysis_status = d.analysis_status
+      }
+      if (d.qa_result) {
+        analysisQa.value = d.qa_result as QaResult
+        rec.evidence_qa = d.qa_result
+      }
+    })
+    .catch(() => {})
+}
+
 onMounted(() => {
   if (props.message?.record?.id && props.message?.record?.finish) {
     getChatData(props.message.record.id)
+    restoreAnalysisState()
   }
 })
 
@@ -313,35 +338,31 @@ defineExpose({ sendMessage, index: () => index.value, stop })
     />
     <!-- AI2BI: 知识问答模式回答 -->
     <div v-if="message?.record?.knowledge_answer" class="ai2bi-knowledge-qa">
-      <div class="knowledge-content" v-html="renderMarkdown(message.record.knowledge_answer)"></div>
+      <MdComponent :message="message.record.knowledge_answer" />
     </div>
-    <!-- AI2BI: 分析结果 + 证据链 -->
+    <!-- AI2BI: 分析运行状态面板 -->
+    <AnalysisRunPanel
+      v-if="analysisStatus || message?.record?.analysis_status"
+      :status="analysisStatus || message?.record?.analysis_status"
+      :message="analysisMessage"
+      :qa="analysisQa || (message?.record?.evidence_qa as any)"
+      :datasource-name="message?.record?.datasource ? String(message.record.datasource) : ''"
+      :row-count="message?.record?.data?.fields?.length"
+    />
+    <!-- AI2BI: 分析结果 -->
     <div v-if="message?.record?.analysis" class="ai2bi-analysis">
-      <div class="analysis-content" v-html="renderMarkdown(message.record.analysis)"></div>
+      <MdComponent :message="message.record.analysis" />
     </div>
-    <div v-if="message?.record?.evidence_qa" class="ai2bi-evidence-chain">
-      <el-collapse>
-        <el-collapse-item>
-          <template #title>
-            <span class="evidence-title">
-              📋 证据链
-              <el-tag v-if="message.record.evidence_qa.passed" type="success" size="small" style="margin-left: 8px">✅ 质检通过</el-tag>
-              <el-tag v-else type="warning" size="small" style="margin-left: 8px">⚠️ 质检警告</el-tag>
-            </span>
-          </template>
-          <div class="evidence-detail">
-            <div v-if="message.record.evidence_qa.evidence_summary" class="evidence-summary">
-              <span class="evidence-tag sql">[SQL] {{ message.record.evidence_qa.evidence_summary.sourced_count }} 个</span>
-              <span class="evidence-tag calc">[计算] {{ message.record.evidence_qa.evidence_summary.derived_count }} 个</span>
-              <span class="evidence-tag inferred">[模型推导] {{ message.record.evidence_qa.evidence_summary.inferred_count }} 个</span>
-            </div>
-            <div v-if="message.record.evidence_qa.answer_violations?.length" class="evidence-violations">
-              <div v-for="v in message.record.evidence_qa.answer_violations" :key="v" class="violation-item">⚠️ {{ v }}</div>
-            </div>
-          </div>
-        </el-collapse-item>
-      </el-collapse>
+    <!-- AI2BI: 证据链入口 -->
+    <div v-if="message?.record?.id" class="ai2bi-evidence-chain">
+      <el-button size="small" text type="primary" @click="evidenceDrawerVisible = true">
+        📋 查看证据链
+      </el-button>
     </div>
+    <EvidenceDrawer
+      v-model="evidenceDrawerVisible"
+      :record-id="message?.record?.id"
+    />
     <slot></slot>
     <template #tool>
       <slot name="tool"></slot>

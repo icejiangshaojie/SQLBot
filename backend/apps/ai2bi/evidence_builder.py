@@ -11,10 +11,10 @@ AI2BI Evidence Builder — 从 SQL 执行结果构建结构化证据包
 分析 LLM 不能访问原始数据库，只能基于 Evidence Pack 中的数据做分析。
 """
 
-import re
 import json
 import logging
-from typing import Any, Optional
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def extract_sourced_numbers(result: dict) -> list[dict]:
     """
     numbers = []
     data = result.get("data", [])
-    fields = result.get("fields", [])
+    _fields = result.get("fields", [])
 
     for row_idx, row in enumerate(data[:100]):  # 限制 100 行避免过大
         if not isinstance(row, dict):
@@ -60,7 +60,7 @@ def extract_sourced_numbers(result: dict) -> list[dict]:
     return numbers
 
 
-def _try_parse_numeric_string(val: str) -> Optional[float]:
+def _try_parse_numeric_string(val: str) -> float | None:
     """尝试将字符串解析为数值，处理千分位逗号"""
     if not val or not any(c.isdigit() for c in val):
         return None
@@ -147,7 +147,7 @@ def summarize_result(result: dict) -> dict:
     sample = []
     for row in data[:5]:
         if isinstance(row, dict):
-            sample.append({k: v for k, v in list(row.items())[:10]})
+            sample.append(dict(list(row.items())[:10]))
 
     return {
         "columns": fields,
@@ -162,19 +162,21 @@ def build_evidence_pack(
     sql: str,
     result: dict,
     route_info: dict,
-    metric_context: Optional[list] = None,
+    metric_context: list | None = None,
+    facts: list | None = None,
 ) -> dict:
     """
     构建完整的 Evidence Pack，作为分析 LLM 的唯一数据输入。
 
     参数:
         sql: 已执行的 SQL 文本
-        result: ODPS 执行结果 {fields, data}
+        result: 执行结果 {fields, data}
         route_info: 路由信息 {agent, domain, sub_skill, confidence, is_fallback}
         metric_context: 涉及的指标定义列表
+        facts: 确定性分析事实列表（AnalysisFact），Phase 0 注入
 
     返回:
-        Evidence Pack dict
+        Evidence Pack dict（含 facts）
     """
     data = result.get("data", [])
     fields = result.get("fields", [])
@@ -216,6 +218,7 @@ def build_evidence_pack(
         },
         "sourced_numbers": sourced_numbers,
         "metric_definitions": metric_context or [],
+        "facts": facts or [],
     }
 
     return pack
@@ -278,7 +281,32 @@ def evidence_pack_to_prompt(pack: dict) -> str:
             parts.append(f"  ... ({len(sourced) - 30} more)")
         parts.append("</sourced_numbers>")
 
+    # 确定性分析 Facts（Phase 0）
+    facts = pack.get("facts", [])
+    if facts:
+        parts.append(f"<verified_facts count=\"{len(facts)}\">")
+        for f in facts:
+            if isinstance(f, dict):
+                parts.append(_format_fact_prompt(f))
+            else:
+                parts.append(_format_fact_prompt(f.to_dict() if hasattr(f, "to_dict") else dict(f)))
+        parts.append("</verified_facts>")
+
     return "\n".join(parts)
+
+
+def _format_fact_prompt(f: dict) -> str:
+    """将单个 Fact 渲染为提示文本。"""
+    status = f.get("status", "verified")
+    if status == "data_insufficient":
+        return f"  - [数据不足] {f.get('label', '')}: {f.get('reason', '')}"
+    source = f.get("source_type", "sql")
+    value = f.get("display") or f.get("value")
+    formula = f.get("formula")
+    line = f"  - [{source}] {f.get('label', '')}: {value}"
+    if formula:
+        line += f"  公式: {formula}"
+    return line
 
 
 # ── 证据记录保存 ──────────────────────────────────
@@ -290,31 +318,105 @@ def save_evidence_record(
     route_info: dict,
     sql: str,
     result: dict,
-    qa_passed: Optional[bool] = None,
-    qa_violations: Optional[list] = None,
+    qa_passed: bool | None = None,
+    qa_violations: list | None = None,
+    metric_context: list | None = None,
+    facts: list | None = None,
+    qa_result: dict | None = None,
+    analysis_status: str | None = None,
+    analysis_error: str | None = None,
+    analysis_output: str | None = None,
+    source_record_id: int | None = None,
+    result_hash: str | None = None,
+    agent_snapshot: dict | None = None,
+    model_name: str | None = None,
+    total_tokens: int | None = None,
+    duration_ms: int | None = None,
 ) -> Any:
-    """保存证据记录到 DB"""
-    from apps.ai2bi.evidence_models import Ai2biEvidence
+    """保存（或按 record_id 更新）证据记录到 DB。
+
+    Phase 0：接收已经构建的 pack 输入，避免二次构建丢失 Facts/指标上下文。
+    同一 record_id 采用可重复更新，避免刷新或重试产生含义不明的多条记录。
+    """
     from datetime import datetime
 
-    pack = build_evidence_pack(sql, result, route_info)
+    from sqlmodel import select
+
+    from apps.ai2bi.evidence_models import Ai2biEvidence
+
+    pack = build_evidence_pack(sql, result, route_info, metric_context, facts)
     agent = route_info.get("agent") or {}
 
-    evidence = Ai2biEvidence(
-        record_id=record_id,
+    # 兼容旧字段：从 facts 分类填充 sourced/derived
+    sourced_numbers = pack["sourced_numbers"]
+    derived_numbers = []
+    if facts:
+        for f in facts:
+            fdict = f.to_dict() if hasattr(f, "to_dict") else dict(f)
+            if fdict.get("source_type") == "backend_calc":
+                derived_numbers.append({
+                    "value": fdict.get("value"),
+                    "formula": fdict.get("formula"),
+                    "fact_id": fdict.get("fact_id"),
+                    "label": fdict.get("label"),
+                })
+    model_inferred = []
+
+    # 结果 hash（稳定）
+    if result_hash is None:
+        import hashlib
+
+        import orjson
+        result_hash = hashlib.sha256(orjson.dumps(result, default=str).decode("utf-8", "ignore").encode("utf-8")).hexdigest()[:32]
+
+    # 按 record_id 查找已有记录，存在则更新
+    existing = session.exec(
+        select(Ai2biEvidence).where(Ai2biEvidence.record_id == record_id)
+    ).first()
+
+    common = dict(  # noqa: C408
         chat_id=chat_id,
         agent_id=agent.get("id"),
+        source_record_id=source_record_id if source_record_id is not None else record_id,
         route_info=json.dumps(route_info, ensure_ascii=False, default=str),
         sql_text=sql,
         sql_executed=True,
         sql_row_count=len(result.get("data", [])),
         sql_result_summary=json.dumps(pack["result"]["summary"], ensure_ascii=False, default=str),
-        sourced_numbers=json.dumps(pack["sourced_numbers"], ensure_ascii=False, default=str),
-        derived_numbers="[]",
-        model_inferred="[]",
+        sourced_numbers=json.dumps(sourced_numbers, ensure_ascii=False, default=str),
+        derived_numbers=json.dumps(derived_numbers, ensure_ascii=False, default=str),
+        model_inferred=json.dumps(model_inferred, ensure_ascii=False, default=str),
+        analysis_status=analysis_status,
+        analysis_error=analysis_error,
+        analysis_facts=json.dumps(
+            [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in (facts or [])],
+            ensure_ascii=False, default=str,
+        ) if facts is not None else None,
+        qa_result=json.dumps(qa_result, ensure_ascii=False, default=str) if qa_result else None,
+        analysis_output=analysis_output,
+        result_hash=result_hash,
+        metric_context=json.dumps(metric_context or [], ensure_ascii=False, default=str),
+        agent_snapshot=json.dumps(agent_snapshot, ensure_ascii=False, default=str) if agent_snapshot else None,
+        model_name=model_name,
+        total_tokens=total_tokens,
+        duration_ms=duration_ms,
         qa_passed=qa_passed,
         qa_violations=json.dumps(qa_violations or [], ensure_ascii=False),
+        updated_at=datetime.now(),
+    )
+
+    if existing:
+        for k, v in common.items():
+            setattr(existing, k, v)
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        return existing
+
+    evidence = Ai2biEvidence(
+        record_id=record_id,
         created_at=datetime.now(),
+        **common,
     )
     session.add(evidence)
     session.commit()

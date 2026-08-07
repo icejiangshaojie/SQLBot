@@ -3,6 +3,8 @@ import BaseAnswer from './BaseAnswer.vue'
 import { chatApi, ChatInfo, type ChatMessage, ChatRecord } from '@/api/chat.ts'
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import MdComponent from '@/views/chat/component/MdComponent.vue'
+import EvidenceDrawer from '@/views/chat/analysis/EvidenceDrawer.vue'
+
 const props = withDefaults(
   defineProps<{
     chatList?: Array<ChatInfo>
@@ -77,6 +79,7 @@ const _loading = computed({
 })
 
 const stopFlag = ref(false)
+const evidenceDrawerVisible = ref(false)
 const sendMessage = async () => {
   stopFlag.value = false
   _loading.value = true
@@ -209,6 +212,12 @@ defineExpose({ sendMessage, index: () => index.value, chatList: () => _chatList.
     :loading="_loading"
   >
     <MdComponent :message="message.record?.analysis" style="margin-top: 12px" />
+    <div v-if="message?.record?.id" style="margin-top: 8px">
+      <el-button size="small" text type="primary" @click="evidenceDrawerVisible = true">
+        📋 查看证据链
+      </el-button>
+    </div>
+    <EvidenceDrawer v-model="evidenceDrawerVisible" :record-id="message?.record?.id" />
     <slot></slot>
     <template #tool>
       <slot name="tool"></slot>

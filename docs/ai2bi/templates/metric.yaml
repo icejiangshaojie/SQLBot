@@ -1,0 +1,50 @@
+metric_key: corp_deposit.average_daily_balance
+name: 对公日均存款余额
+aliases:
+  - 日均余额
+  - 平均存款余额
+version: 0.1.0
+status: draft
+domain_ref: corp_deposit
+workspace_ref: workspace.default
+owner: business.owner@example.com
+data_owner: data.owner@example.com
+
+business_definition: 统计期间内对公客户每日存款余额之和除以有效天数。
+calculation: SUM(daily_balance) / COUNT(DISTINCT balance_date)
+grain: customer-day
+time_semantics:
+  primary_field: balance_date
+  type: period_average
+  timezone: Asia/Hong_Kong
+unit: HKD
+format: '#,##0.00'
+
+source_refs:
+  tables:
+    - corp_deposit.dws_customer_daily_balance
+  fields:
+    - corp_deposit.dws_customer_daily_balance.daily_balance
+    - corp_deposit.dws_customer_daily_balance.balance_date
+allowed_dimensions:
+  - customer_segment
+  - region
+  - currency
+mandatory_filters:
+  - rule.corp_deposit.valid_customer
+  - rule.corp_deposit.balance_currency_hkd
+
+default_analysis_templates:
+  - summary
+  - trend
+  - structure_split
+quality_expectations:
+  - balance_date 不得存在无说明的连续缺失
+examples:
+  - 2026年7月对公日均存款余额是多少？
+counter_examples:
+  - 对公存款余额是多少？需要先澄清时点余额还是日均余额
+source:
+  kind: db
+  uri: ai2bi_metric_dict/corp_deposit.average_daily_balance
+change_reason: 初始录入口径

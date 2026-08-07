@@ -1,25 +1,35 @@
 """AI2BI API routes: metrics, memory, skill-dev files, agents."""
+import json
+import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
-from fastapi import APIRouter, Body, HTTPException
-from sqlmodel import Session, select
-from pydantic import BaseModel
-from common.core.db import engine
-from common.core.config import settings
-import os, json, yaml
 
-from apps.ai2bi.models import (
-    Ai2biMetricDomain, Ai2biMetric, Ai2biMetricHistory,
-    Ai2biMemory, Ai2biMemorySummary,
+from fastapi import APIRouter, Body, HTTPException
+from pydantic import BaseModel
+from sqlmodel import Session, select
+
+from apps.ai2bi.agent_models import (
+    Ai2biAgent,
+    Ai2biAgentGrant,
+    Ai2biAgentRequest,
+    Ai2biAgentVersion,
 )
 from apps.ai2bi.asset_models import (
-    Ai2biTableDict, Ai2biFieldDict, Ai2biMetricDict,
-    Ai2biBusinessRule, Ai2biSqlTemplate, Ai2biTableLineage,
+    Ai2biBusinessRule,
+    Ai2biFieldDict,
+    Ai2biMetricDict,
+    Ai2biSqlTemplate,
+    Ai2biTableDict,
+    Ai2biTableLineage,
 )
-from apps.ai2bi.agent_models import (
-    Ai2biAgent, Ai2biAgentGrant, Ai2biAgentRequest, Ai2biAgentVersion,
+from apps.ai2bi.models import (
+    Ai2biMemory,
+    Ai2biMemorySummary,
+    Ai2biMetric,
+    Ai2biMetricDomain,
+    Ai2biMetricHistory,
 )
+from common.core.db import engine
 
 router = APIRouter(tags=["ai2bi"], prefix="/ai2bi", include_in_schema=False)
 
@@ -37,34 +47,34 @@ def _session():
 class MetricDomainCreate(BaseModel):
     code: str
     cn_name: str
-    description: Optional[str] = None
-    owner: Optional[str] = None
+    description: str | None = None
+    owner: str | None = None
 
 class MetricCreate(BaseModel):
     domain_id: int
     cn_name: str
-    en_name: Optional[str] = None
+    en_name: str | None = None
     tier: str = "L2"
-    business_definition: Optional[str] = None
-    calculation: Optional[str] = None
-    mandatory_rules: Optional[str] = None
-    sql_template: Optional[str] = None
-    grain: Optional[str] = None
-    source_tables: Optional[str] = None
-    owner: Optional[str] = None
-    notes: Optional[str] = None
+    business_definition: str | None = None
+    calculation: str | None = None
+    mandatory_rules: str | None = None
+    sql_template: str | None = None
+    grain: str | None = None
+    source_tables: str | None = None
+    owner: str | None = None
+    notes: str | None = None
 
 class MetricUpdate(BaseModel):
-    cn_name: Optional[str] = None
-    en_name: Optional[str] = None
-    tier: Optional[str] = None
-    business_definition: Optional[str] = None
-    calculation: Optional[str] = None
-    mandatory_rules: Optional[str] = None
-    sql_template: Optional[str] = None
-    grain: Optional[str] = None
-    source_tables: Optional[str] = None
-    notes: Optional[str] = None
+    cn_name: str | None = None
+    en_name: str | None = None
+    tier: str | None = None
+    business_definition: str | None = None
+    calculation: str | None = None
+    mandatory_rules: str | None = None
+    sql_template: str | None = None
+    grain: str | None = None
+    source_tables: str | None = None
+    notes: str | None = None
 
 
 @router.get("/metrics/domains")
@@ -146,14 +156,14 @@ async def metric_history(metric_id: int):
 
 class MemoryCreate(BaseModel):
     scope: str = "user"
-    category: Optional[str] = None
+    category: str | None = None
     content: str
     pinned: bool = False
 
 class MemoryUpdate(BaseModel):
-    content: Optional[str] = None
-    pinned: Optional[bool] = None
-    category: Optional[str] = None
+    content: str | None = None
+    pinned: bool | None = None
+    category: str | None = None
 
 
 @router.get("/memory")
@@ -296,6 +306,7 @@ triggered_by:
 
 from sqlalchemy import text as _text
 
+
 @router.get("/assets/terminology")
 async def assets_terminology():
     """术语列表"""
@@ -314,17 +325,6 @@ async def assets_training():
         )).fetchall()
         return [{"id": r[0], "question": r[1], "description": r[2]} for r in rows]
 
-@router.get("/assets/rules")
-async def assets_rules():
-    """硬规则"""
-    with _session() as s:
-        rows = s.execute(_text(
-            "SELECT id, name, prompt FROM custom_prompt WHERE name = '卡域分析硬规则'"
-        )).fetchall()
-        if rows:
-            return {"name": rows[0][1], "prompt": rows[0][2]}
-        return {"name": "", "prompt": ""}
-
 
 # ═══ 表管理：从 CoreTable/CoreField 读 ODPS 白名单表 ════════════
 
@@ -332,7 +332,7 @@ async def assets_rules():
 async def tables_list():
     """ODPS 白名单表列表"""
     with _session() as s:
-        from apps.datasource.models.datasource import CoreTable, CoreField
+        from apps.datasource.models.datasource import CoreField, CoreTable
         tables = s.exec(select(CoreTable).where(CoreTable.ds_id == 3)).all()
         result = []
         for t in tables:
@@ -357,8 +357,8 @@ async def table_fields(table_id: int):
 @router.post("/tables/{table_name}/sync")
 async def sync_table_fields(table_name: str):
     """从 ODPS 同步表字段到 CoreField"""
+    from apps.datasource.models.datasource import CoreDatasource, CoreField, CoreTable
     from apps.db.db import get_fields
-    from apps.datasource.models.datasource import CoreDatasource, CoreTable, CoreField
     with _session() as s:
         ds = s.get(CoreDatasource, 3)
         # Find or create CoreTable
@@ -387,31 +387,31 @@ class AgentCreate(BaseModel):
     code: str
     name: str
     vertical: str
-    description: Optional[str] = None
+    description: str | None = None
     business_line: str = "零售"
     entry_signals: list[str] = []
     skills: list[str] = []
     exclusive_tables: list[str] = []
     shared_tables: list[str] = []
-    isolation_rules: Optional[str] = None
-    capabilities: Optional[list[str]] = None
-    analysis_templates: Optional[list[str]] = None
-    test_case_path: Optional[str] = None
-    qa_config: Optional[str] = None
+    isolation_rules: str | None = None
+    capabilities: list[str] | None = None
+    analysis_templates: list[str] | None = None
+    test_case_path: str | None = None
+    qa_config: str | None = None
 
 
 class AgentUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    entry_signals: Optional[list[str]] = None
-    skills: Optional[list[str]] = None
-    exclusive_tables: Optional[list[str]] = None
-    shared_tables: Optional[list[str]] = None
-    isolation_rules: Optional[str] = None
-    capabilities: Optional[list[str]] = None
-    analysis_templates: Optional[list[str]] = None
-    test_case_path: Optional[str] = None
-    qa_config: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
+    entry_signals: list[str] | None = None
+    skills: list[str] | None = None
+    exclusive_tables: list[str] | None = None
+    shared_tables: list[str] | None = None
+    isolation_rules: str | None = None
+    capabilities: list[str] | None = None
+    analysis_templates: list[str] | None = None
+    test_case_path: str | None = None
+    qa_config: str | None = None
 
 
 @router.get("/agents")
@@ -577,9 +577,11 @@ async def get_evidence(record_id: int):
         import json as _json
         return {
             "found": True,
+            "evidence_id": ev.id,
             "record_id": ev.record_id,
             "chat_id": ev.chat_id,
             "agent_id": ev.agent_id,
+            "source_record_id": ev.source_record_id,
             "route_info": _json.loads(ev.route_info) if ev.route_info else None,
             "sql_text": ev.sql_text,
             "sql_executed": ev.sql_executed,
@@ -588,9 +590,21 @@ async def get_evidence(record_id: int):
             "sourced_numbers": _json.loads(ev.sourced_numbers) if ev.sourced_numbers else [],
             "derived_numbers": _json.loads(ev.derived_numbers) if ev.derived_numbers else [],
             "model_inferred": _json.loads(ev.model_inferred) if ev.model_inferred else [],
+            "analysis_status": ev.analysis_status,
+            "analysis_error": ev.analysis_error,
+            "analysis_facts": _json.loads(ev.analysis_facts) if ev.analysis_facts else [],
+            "qa_result": _json.loads(ev.qa_result) if ev.qa_result else None,
+            "analysis_output": ev.analysis_output,
+            "result_hash": ev.result_hash,
+            "metric_context": _json.loads(ev.metric_context) if ev.metric_context else [],
+            "agent_snapshot": _json.loads(ev.agent_snapshot) if ev.agent_snapshot else None,
+            "model_name": ev.model_name,
+            "total_tokens": ev.total_tokens,
+            "duration_ms": ev.duration_ms,
             "qa_passed": ev.qa_passed,
             "qa_violations": _json.loads(ev.qa_violations) if ev.qa_violations else [],
             "created_at": str(ev.created_at) if ev.created_at else None,
+            "updated_at": str(ev.updated_at) if ev.updated_at else None,
         }
 
 
@@ -599,7 +613,10 @@ async def get_evidence(record_id: int):
 @router.post("/agents/{agent_id}/test")
 async def run_agent_tests(agent_id: int):
     """运行 Agent 的回归测试集"""
-    from apps.ai2bi.test_runner import run_test_cases_for_agent, load_test_cases_from_file
+    from apps.ai2bi.test_runner import (
+        load_test_cases_from_file,
+        run_test_cases_for_agent,
+    )
 
     # 如果 DB 中没有测试用例，尝试从 AIBI_v2 文件加载
     with _session() as s:
@@ -663,139 +680,139 @@ def _guess_layer(table_name: str) -> str:
 class TableDictCreate(BaseModel):
     domain_code: str
     table_name: str
-    table_comment: Optional[str] = None
+    table_comment: str | None = None
     layer: str = "other"
-    datasource_id: Optional[int] = None
+    datasource_id: int | None = None
     field_count: int = 0
     metric_count: int = 0
     dimension_count: int = 0
-    upstream_tables: Optional[str] = None
-    ddl_content: Optional[str] = None
+    upstream_tables: str | None = None
+    ddl_content: str | None = None
     is_active: bool = True
 
 class TableDictUpdate(BaseModel):
-    domain_code: Optional[str] = None
-    table_name: Optional[str] = None
-    table_comment: Optional[str] = None
-    layer: Optional[str] = None
-    datasource_id: Optional[int] = None
-    field_count: Optional[int] = None
-    metric_count: Optional[int] = None
-    dimension_count: Optional[int] = None
-    upstream_tables: Optional[str] = None
-    ddl_content: Optional[str] = None
-    is_active: Optional[bool] = None
+    domain_code: str | None = None
+    table_name: str | None = None
+    table_comment: str | None = None
+    layer: str | None = None
+    datasource_id: int | None = None
+    field_count: int | None = None
+    metric_count: int | None = None
+    dimension_count: int | None = None
+    upstream_tables: str | None = None
+    ddl_content: str | None = None
+    is_active: bool | None = None
 
 class FieldDictCreate(BaseModel):
     table_id: int
     domain_code: str
     field_name: str
     field_type: str
-    field_comment: Optional[str] = None
+    field_comment: str | None = None
     category: str = "other"
-    aggregation: Optional[str] = None
+    aggregation: str | None = None
     is_partition: bool = False
     is_primary_key: bool = False
     is_nullable: bool = True
-    sample_values: Optional[str] = None
+    sample_values: str | None = None
 
 class FieldDictUpdate(BaseModel):
-    table_id: Optional[int] = None
-    domain_code: Optional[str] = None
-    field_name: Optional[str] = None
-    field_type: Optional[str] = None
-    field_comment: Optional[str] = None
-    category: Optional[str] = None
-    aggregation: Optional[str] = None
-    is_partition: Optional[bool] = None
-    is_primary_key: Optional[bool] = None
-    is_nullable: Optional[bool] = None
-    sample_values: Optional[str] = None
+    table_id: int | None = None
+    domain_code: str | None = None
+    field_name: str | None = None
+    field_type: str | None = None
+    field_comment: str | None = None
+    category: str | None = None
+    aggregation: str | None = None
+    is_partition: bool | None = None
+    is_primary_key: bool | None = None
+    is_nullable: bool | None = None
+    sample_values: str | None = None
 
 class MetricDictCreate(BaseModel):
     domain_code: str
     cn_name: str
-    metric_number: Optional[str] = None
-    en_name: Optional[str] = None
-    alias: Optional[str] = None
-    business_definition: Optional[str] = None
-    calculation: Optional[str] = None
-    sql_template: Optional[str] = None
-    grain: Optional[str] = None
-    time_range: Optional[str] = None
-    unit: Optional[str] = None
-    source_table_id: Optional[int] = None
-    source_field: Optional[str] = None
-    related_metrics: Optional[str] = None
+    metric_number: str | None = None
+    en_name: str | None = None
+    alias: str | None = None
+    business_definition: str | None = None
+    calculation: str | None = None
+    sql_template: str | None = None
+    grain: str | None = None
+    time_range: str | None = None
+    unit: str | None = None
+    source_table_id: int | None = None
+    source_field: str | None = None
+    related_metrics: str | None = None
     status: str = "candidate"
     version: str = "1.0"
 
 class MetricDictUpdate(BaseModel):
-    domain_code: Optional[str] = None
-    cn_name: Optional[str] = None
-    metric_number: Optional[str] = None
-    en_name: Optional[str] = None
-    alias: Optional[str] = None
-    business_definition: Optional[str] = None
-    calculation: Optional[str] = None
-    sql_template: Optional[str] = None
-    grain: Optional[str] = None
-    time_range: Optional[str] = None
-    unit: Optional[str] = None
-    source_table_id: Optional[int] = None
-    source_field: Optional[str] = None
-    related_metrics: Optional[str] = None
-    status: Optional[str] = None
-    version: Optional[str] = None
+    domain_code: str | None = None
+    cn_name: str | None = None
+    metric_number: str | None = None
+    en_name: str | None = None
+    alias: str | None = None
+    business_definition: str | None = None
+    calculation: str | None = None
+    sql_template: str | None = None
+    grain: str | None = None
+    time_range: str | None = None
+    unit: str | None = None
+    source_table_id: int | None = None
+    source_field: str | None = None
+    related_metrics: str | None = None
+    status: str | None = None
+    version: str | None = None
 
 class BusinessRuleCreate(BaseModel):
     domain_code: str
     title: str
     content: str
     category: str = "general"
-    related_table_id: Optional[int] = None
-    related_metric_id: Optional[int] = None
+    related_table_id: int | None = None
+    related_metric_id: int | None = None
     severity: str = "warning"
-    example: Optional[str] = None
-    counter_example: Optional[str] = None
+    example: str | None = None
+    counter_example: str | None = None
 
 class BusinessRuleUpdate(BaseModel):
-    domain_code: Optional[str] = None
-    title: Optional[str] = None
-    content: Optional[str] = None
-    category: Optional[str] = None
-    related_table_id: Optional[int] = None
-    related_metric_id: Optional[int] = None
-    severity: Optional[str] = None
-    example: Optional[str] = None
-    counter_example: Optional[str] = None
+    domain_code: str | None = None
+    title: str | None = None
+    content: str | None = None
+    category: str | None = None
+    related_table_id: int | None = None
+    related_metric_id: int | None = None
+    severity: str | None = None
+    example: str | None = None
+    counter_example: str | None = None
 
 class SqlTemplateCreate(BaseModel):
     domain_code: str
     name: str
-    description: Optional[str] = None
-    scenario: Optional[str] = None
+    description: str | None = None
+    scenario: str | None = None
     sql_template: str = ""
-    params: Optional[str] = None
-    related_table_ids: Optional[str] = None
-    related_metric_ids: Optional[str] = None
+    params: str | None = None
+    related_table_ids: str | None = None
+    related_metric_ids: str | None = None
 
 class SqlTemplateUpdate(BaseModel):
-    domain_code: Optional[str] = None
-    name: Optional[str] = None
-    description: Optional[str] = None
-    scenario: Optional[str] = None
-    sql_template: Optional[str] = None
-    params: Optional[str] = None
-    related_table_ids: Optional[str] = None
-    related_metric_ids: Optional[str] = None
+    domain_code: str | None = None
+    name: str | None = None
+    description: str | None = None
+    scenario: str | None = None
+    sql_template: str | None = None
+    params: str | None = None
+    related_table_ids: str | None = None
+    related_metric_ids: str | None = None
 
 class TableLineageCreate(BaseModel):
     domain_code: str
     from_table: str
     to_table: str
     relation_type: str = "direct"
-    sql_snippet: Optional[str] = None
+    sql_snippet: str | None = None
 
 
 # ── ai2bi_table_dict (表字典) ──
@@ -1183,27 +1200,27 @@ async def get_domain_context(domain_code: str):
             select(Ai2biTableDict).where(Ai2biTableDict.domain_code == domain_code)
         ).all()
         table_ids = [t.id for t in tables]
-        
+
         # Fields
         fields = s.exec(
             select(Ai2biFieldDict).where(Ai2biFieldDict.table_id.in_(table_ids))
         ).all() if table_ids else []
-        
+
         # Metrics
         metrics = s.exec(
             select(Ai2biMetricDict).where(Ai2biMetricDict.domain_code == domain_code)
         ).all()
-        
+
         # Rules
         rules = s.exec(
             select(Ai2biBusinessRule).where(Ai2biBusinessRule.domain_code == domain_code)
         ).all()
-        
+
         # SQL Templates
         templates = s.exec(
             select(Ai2biSqlTemplate).where(Ai2biSqlTemplate.domain_code == domain_code)
         ).all()
-        
+
         return {
             "domain_code": domain_code,
             "tables": [{"id": t.id, "table_name": t.table_name, "table_comment": t.table_comment,
@@ -1228,7 +1245,6 @@ async def sync_tables_from_source(tables: list[dict] = Body(..., embed=False)):
     
     请求体: [{"domain_code", "table_name", "table_comment", "layer", "ddl_content", "fields": [...]}]
     """
-    import json as _json
     with _session() as s:
         for item in tables:
             # Upsert table
@@ -1255,7 +1271,7 @@ async def sync_tables_from_source(tables: list[dict] = Body(..., embed=False)):
                     created_at=datetime.now(), updated_at=datetime.now(),
                 )
                 s.add(t); s.commit(); s.refresh(t)
-            
+
             # Sync fields
             for f in item.get("fields", []):
                 fe = s.exec(
